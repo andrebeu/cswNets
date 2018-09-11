@@ -1,0 +1,221 @@
+
+
+ training CSW nets 
+
+/usr/licensed/anaconda3/4.4.0/lib/python3.6/site-packages/h5py/__init__.py:34: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+2018-05-05 12:18:55.704439: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+saving to savedmodels/RNNseq2_05-05-12.18.55.694915/model-initial-05-05-12.18.55.694946
+saving to savedmodels/LSTMseq2_05-05-12.18.59.630486/model-initial-05-05-12.18.59.630525
+
+ RAND False COND True {'batch_size': 25, 'num_epochs': 50000, 'loss_op': <function mean_squared_error at 0x2b5da1742378>} 
+
+epoch 0.0 elapsed time 0:00:00.883967
+epoch 0.01 elapsed time 0:00:00.148972
+epoch 0.02 elapsed time 0:00:00.148410
+epoch 0.03 elapsed time 0:00:00.147513
+epoch 0.04 elapsed time 0:00:00.150452
+epoch 0.05 elapsed time 0:00:00.147146
+epoch 0.06 elapsed time 0:00:00.146580
+epoch 0.07 elapsed time 0:00:00.149576
+epoch 0.08 elapsed time 0:00:00.148796
+epoch 0.09 elapsed time 0:00:00.151900
+epoch 0.1 elapsed time 0:00:00.148957
+epoch 0.11 elapsed time 0:00:00.149253
+epoch 0.12 elapsed time 0:00:00.150347
+epoch 0.13 elapsed time 0:00:00.149345
+epoch 0.14 elapsed time 0:00:00.147893
+epoch 0.15 elapsed time 0:00:00.149234
+epoch 0.16 elapsed time 0:00:00.148856
+epoch 0.17 elapsed time 0:00:00.147681
+epoch 0.18 elapsed time 0:00:00.146972
+epoch 0.19 elapsed time 0:00:00.148188
+epoch 0.2 elapsed time 0:00:00.150271
+epoch 0.21 elapsed time 0:00:00.148498
+epoch 0.22 elapsed time 0:00:00.149571
+epoch 0.23 elapsed time 0:00:00.148487
+epoch 0.24 elapsed time 0:00:00.149273
+epoch 0.25 elapsed time 0:00:00.150142
+epoch 0.26 elapsed time 0:00:00.148972
+epoch 0.27 elapsed time 0:00:00.148607
+epoch 0.28 elapsed time 0:00:00.148417
+epoch 0.29 elapsed time 0:00:00.148891
+epoch 0.3 elapsed time 0:00:00.147648
+epoch 0.31 elapsed time 0:00:00.147362
+epoch 0.32 elapsed time 0:00:00.149560
+epoch 0.33 elapsed time 0:00:00.148310
+epoch 0.34 elapsed time 0:00:00.149121
+epoch 0.35 elapsed time 0:00:00.146821
+epoch 0.36 elapsed time 0:00:00.150283
+epoch 0.37 elapsed time 0:00:00.148007
+epoch 0.38 elapsed time 0:00:00.147499
+epoch 0.39 elapsed time 0:00:00.148641
+epoch 0.4 elapsed time 0:00:00.147769
+epoch 0.41 elapsed time 0:00:00.150326
+epoch 0.42 elapsed time 0:00:00.149657
+epoch 0.43 elapsed time 0:00:00.150230
+epoch 0.44 elapsed time 0:00:00.149611
+epoch 0.45 elapsed time 0:00:00.148969
+epoch 0.46 elapsed time 0:00:00.146235
+epoch 0.47 elapsed time 0:00:00.149495
+epoch 0.48 elapsed time 0:00:00.149499
+epoch 0.49 elapsed time 0:00:00.147321
+epoch 0.5 elapsed time 0:00:00.149285
+epoch 0.51 elapsed time 0:00:00.148429
+epoch 0.52 elapsed time 0:00:00.147375
+epoch 0.53 elapsed time 0:00:00.147899
+epoch 0.54 elapsed time 0:00:00.148921
+epoch 0.55 elapsed time 0:00:00.150521
+epoch 0.56 elapsed time 0:00:00.149935
+epoch 0.57 elapsed time 0:00:00.148678
+epoch 0.58 elapsed time 0:00:00.147212
+epoch 0.59 elapsed time 0:00:00.147810
+epoch 0.6 elapsed time 0:00:00.148889
+epoch 0.61 elapsed time 0:00:00.149776
+epoch 0.62 elapsed time 0:00:00.148654
+epoch 0.63 elapsed time 0:00:00.148972
+epoch 0.64 elapsed time 0:00:00.150159
+epoch 0.65 elapsed time 0:00:00.148769
+epoch 0.66 elapsed time 0:00:00.149267
+epoch 0.67 elapsed time 0:00:00.149964
+epoch 0.68 elapsed time 0:00:00.148967
+epoch 0.69 elapsed time 0:00:00.147742
+epoch 0.7 elapsed time 0:00:00.148391
+epoch 0.71 elapsed time 0:00:00.148304
+epoch 0.72 elapsed time 0:00:00.147944
+epoch 0.73 elapsed time 0:00:00.149471
+epoch 0.74 elapsed time 0:00:00.147520
+epoch 0.75 elapsed time 0:00:00.148990
+epoch 0.76 elapsed time 0:00:00.147761
+epoch 0.77 elapsed time 0:00:00.147987
+epoch 0.78 elapsed time 0:00:00.148197
+epoch 0.79 elapsed time 0:00:00.147655
+epoch 0.8 elapsed time 0:00:00.148358
+epoch 0.81 elapsed time 0:00:00.148438
+epoch 0.82 elapsed time 0:00:00.152699
+epoch 0.83 elapsed time 0:00:00.150853
+epoch 0.84 elapsed time 0:00:00.147826
+epoch 0.85 elapsed time 0:00:00.150407
+epoch 0.86 elapsed time 0:00:00.149978
+epoch 0.87 elapsed time 0:00:00.148084
+epoch 0.88 elapsed time 0:00:00.149250
+epoch 0.89 elapsed time 0:00:00.149590
+epoch 0.9 elapsed time 0:00:00.146316
+epoch 0.91 elapsed time 0:00:00.148274
+epoch 0.92 elapsed time 0:00:00.150639
+epoch 0.93 elapsed time 0:00:00.148990
+epoch 0.94 elapsed time 0:00:00.149041
+epoch 0.95 elapsed time 0:00:00.149437
+epoch 0.96 elapsed time 0:00:00.149469
+epoch 0.97 elapsed time 0:00:00.149516
+epoch 0.98 elapsed time 0:00:00.148584
+epoch 0.99 elapsed time 0:00:00.149295
+saving to savedmodels/RNNseq2_05-05-12.18.55.694915/model-trained-05-05-12.19.01.845345
+1 0:07:10.073122
+epoch 0.0 elapsed time 0:00:04.833219
+epoch 0.01 elapsed time 0:00:00.255737
+epoch 0.02 elapsed time 0:00:00.258302
+epoch 0.03 elapsed time 0:00:00.259257
+epoch 0.04 elapsed time 0:00:00.257436
+epoch 0.05 elapsed time 0:00:00.258863
+epoch 0.06 elapsed time 0:00:00.258071
+epoch 0.07 elapsed time 0:00:00.257780
+epoch 0.08 elapsed time 0:00:00.258576
+epoch 0.09 elapsed time 0:00:00.261483
+epoch 0.1 elapsed time 0:00:00.257905
+epoch 0.11 elapsed time 0:00:00.258052
+epoch 0.12 elapsed time 0:00:00.256196
+epoch 0.13 elapsed time 0:00:00.260496
+epoch 0.14 elapsed time 0:00:00.256492
+epoch 0.15 elapsed time 0:00:00.260461
+epoch 0.16 elapsed time 0:00:00.256164
+epoch 0.17 elapsed time 0:00:00.255766
+epoch 0.18 elapsed time 0:00:00.256295
+epoch 0.19 elapsed time 0:00:00.256487
+epoch 0.2 elapsed time 0:00:00.255807
+epoch 0.21 elapsed time 0:00:00.258534
+epoch 0.22 elapsed time 0:00:00.259410
+epoch 0.23 elapsed time 0:00:00.253623
+epoch 0.24 elapsed time 0:00:00.258062
+epoch 0.25 elapsed time 0:00:00.255940
+epoch 0.26 elapsed time 0:00:00.255197
+epoch 0.27 elapsed time 0:00:00.255995
+epoch 0.28 elapsed time 0:00:00.259187
+epoch 0.29 elapsed time 0:00:00.255957
+epoch 0.3 elapsed time 0:00:00.257792
+epoch 0.31 elapsed time 0:00:00.258942
+epoch 0.32 elapsed time 0:00:00.256253
+epoch 0.33 elapsed time 0:00:00.256095
+epoch 0.34 elapsed time 0:00:00.258055
+epoch 0.35 elapsed time 0:00:00.258295
+epoch 0.36 elapsed time 0:00:00.258293
+epoch 0.37 elapsed time 0:00:00.256671
+epoch 0.38 elapsed time 0:00:00.253643
+epoch 0.39 elapsed time 0:00:00.256460
+epoch 0.4 elapsed time 0:00:00.256297
+epoch 0.41 elapsed time 0:00:00.256698
+epoch 0.42 elapsed time 0:00:00.253912
+epoch 0.43 elapsed time 0:00:00.258546
+epoch 0.44 elapsed time 0:00:00.254794
+epoch 0.45 elapsed time 0:00:00.255432
+epoch 0.46 elapsed time 0:00:00.257496
+epoch 0.47 elapsed time 0:00:00.256871
+epoch 0.48 elapsed time 0:00:00.259473
+epoch 0.49 elapsed time 0:00:00.257066
+epoch 0.5 elapsed time 0:00:00.258672
+epoch 0.51 elapsed time 0:00:00.260455
+epoch 0.52 elapsed time 0:00:00.253103
+epoch 0.53 elapsed time 0:00:00.253148
+epoch 0.54 elapsed time 0:00:00.259213
+epoch 0.55 elapsed time 0:00:00.262435
+epoch 0.56 elapsed time 0:00:00.257918
+epoch 0.57 elapsed time 0:00:00.255576
+epoch 0.58 elapsed time 0:00:00.257643
+epoch 0.59 elapsed time 0:00:00.259900
+epoch 0.6 elapsed time 0:00:00.258149
+epoch 0.61 elapsed time 0:00:00.262387
+epoch 0.62 elapsed time 0:00:00.257947
+epoch 0.63 elapsed time 0:00:00.261136
+epoch 0.64 elapsed time 0:00:00.255886
+epoch 0.65 elapsed time 0:00:00.263542
+epoch 0.66 elapsed time 0:00:00.255955
+epoch 0.67 elapsed time 0:00:00.253607
+epoch 0.68 elapsed time 0:00:00.253234
+epoch 0.69 elapsed time 0:00:00.257027
+epoch 0.7 elapsed time 0:00:00.257227
+epoch 0.71 elapsed time 0:00:00.256292
+epoch 0.72 elapsed time 0:00:00.254527
+epoch 0.73 elapsed time 0:00:00.255535
+epoch 0.74 elapsed time 0:00:00.256048
+epoch 0.75 elapsed time 0:00:00.254694
+epoch 0.76 elapsed time 0:00:00.257944
+epoch 0.77 elapsed time 0:00:00.258310
+epoch 0.78 elapsed time 0:00:00.257969
+epoch 0.79 elapsed time 0:00:00.258531
+epoch 0.8 elapsed time 0:00:00.257453
+epoch 0.81 elapsed time 0:00:00.256957
+epoch 0.82 elapsed time 0:00:00.256123
+epoch 0.83 elapsed time 0:00:00.259110
+epoch 0.84 elapsed time 0:00:00.255190
+epoch 0.85 elapsed time 0:00:00.259327
+epoch 0.86 elapsed time 0:00:00.260849
+epoch 0.87 elapsed time 0:00:00.256343
+epoch 0.88 elapsed time 0:00:00.257746
+epoch 0.89 elapsed time 0:00:00.256597
+epoch 0.9 elapsed time 0:00:00.254463
+epoch 0.91 elapsed time 0:00:00.256148
+epoch 0.92 elapsed time 0:00:00.258958
+epoch 0.93 elapsed time 0:00:00.259596
+epoch 0.94 elapsed time 0:00:00.254737
+epoch 0.95 elapsed time 0:00:00.253406
+epoch 0.96 elapsed time 0:00:00.254351
+epoch 0.97 elapsed time 0:00:00.255235
+epoch 0.98 elapsed time 0:00:00.252219
+epoch 0.99 elapsed time 0:00:00.256197
+saving to savedmodels/LSTMseq2_05-05-12.18.59.630486/model-trained-05-05-12.26.11.939116
+1 0:14:35.224953
+
+
+GPU profiling 
+
+gpu_serial, gpu_utilization [%], mem_utilization [%], max_memory_usage [MiB]
