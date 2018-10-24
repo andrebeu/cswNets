@@ -2,7 +2,7 @@ import numpy as np
 from CSW import CSWTask
 
 
-
+#
 def get_tonodeD(graph):
   """ 
   given a graph 
