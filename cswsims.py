@@ -177,7 +177,7 @@ class Trainer():
         pred_data_arr['xbatch'] = xbatch
         pred_data_arr['yhat'] = yhat
       except tf.errors.OutOfRangeError:
-        break
+        break 
     return pred_data_arr
 
   # blocks and sessions
