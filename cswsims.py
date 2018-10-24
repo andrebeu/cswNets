@@ -4,15 +4,12 @@ import RNNs
 from CSW import CSWTask 
 
 """ GOAL
-replicate original results
-"""
-""" 
-WORKFLOW: train & eval, save, restore, analyze. 
+
+WORKFLOW: train & eval, save and restore data, analyze. 
 
 separating RNNs allow me to modularize different tasks
 separating trainers allows me to not have to rebuild graph every time 
-"""
-"""
+
 NB depth == unroll_depth
 """
 
@@ -20,8 +17,7 @@ NB depth == unroll_depth
 NUM_CLASSES = 12
 IN_LEN = 1
 OUT_LEN = 1
-DEPTH = 3 # must be less than number of samples in path 
-CONTEXTA_PR = 0.8
+DEPTH = 5 # must be less than number of samples in path 
 
 class NetGraph():
 
@@ -117,12 +113,13 @@ class NetGraph():
 
 class Trainer():
 
-  def __init__(self,csw_net):
+  def __init__(self,csw_net,graphpr):
     self.net = csw_net
+    self.graphpr = graphpr
     self.embed_switch = 0
     return None
 
-  # steps: single pass through data
+  # steps: single pass through dataset
 
   def train_step(self,Xtrain,Ytrain):
     """ updates model parameters using Xtrain,Ytrain
@@ -229,32 +226,30 @@ class Trainer():
     """
     # initialize task: two graphs two filler ids
     task = CSWTask()
-    graphs = [task.get_graph(CONTEXTA_PR),task.get_graph(1-CONTEXTA_PR)]
-    fillerL = [task.end_node+1,task.end_node+2]
+    graphs = [task.get_graph(self.graphpr),task.get_graph(1-self.graphpr)]
+    graphids = [10,11]
     # prediction dataset
-    # Xfull = task.Xfull_onesent(fillerL,self.net.depth)
-    Xfull = task.Xfull_fullstory_det()
+    Xfull = task.Xfull_onestory_det()
     # array for recording data
     total_num_evals = 0
     for nb,epb in curricula: total_num_evals += nb*epb
     pred_array_dtype = [('xbatch','int32',(len(Xfull),self.net.depth,self.net.in_len)),
-                        ('yhat','float32',(len(Xfull),self.net.depth,self.net.out_len,self.net.num_classes))]
-    pred_data = np.zeros((total_num_evals),dtype=pred_array_dtype)
+                        ('yhat','float32',(len(Xfull),self.net.depth,self.net.out_len,
+                                            self.net.num_classes))]
+    pred_data = np.zeros((total_num_evals), dtype=pred_array_dtype)
     # main loop
     eval_idx = -1
     for nblocks,epb in curricula:
       print('curriculum',(nblocks,epb))
       for block in range(nblocks):
-        # print('block',block)
         blockid = block%2
-        graph,fillerid = graphs[blockid],fillerL[blockid]
-        # print(block,blockid,fillerid)
-        # print(block,'new block new context (graph)',fillerid)
+        graph = graphs[blockid]
+        graphid = graphids[blockid]
+        # print('block',block)
         for ep in range(epb):
           # train step
           path = task.gen_single_path(graph)
-          # Xtrain,Ytrain = task.dataset_onesent(path,fillerid,self.net.depth)
-          Xtrain,Ytrain = task.dataset_fullstory(path,depth=DEPTH)
+          Xtrain,Ytrain = task.dataset_onestory(path,depth=DEPTH)
           self.train_step(Xtrain,Ytrain)
           # predict and eval
           eval_idx += 1

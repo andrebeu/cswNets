@@ -59,6 +59,11 @@ class CSWTask():
     path.append(self.end_node)
     return np.array(path)
 
+  """ one sentence
+  one sentence at a time
+  sentence is a filler id and a state id
+  """
+
   def Xfull_onesent(self,fillerL=None,depth=1):
     """
     returns all valid X datapoints 
@@ -68,21 +73,6 @@ class CSWTask():
     X = np.tile(X,len(fillerL))
     X = np.vstack([X,F]).transpose()
     X = slice_and_stride(X,depth)
-    return X
-
-  def Xfull_fullstory_det(self):
-    """
-    only evaluate on high probability paths
-    returns X, shape: (samples=2,depth=3,len=1)
-    """
-    # the first two paths are from 1.0 graph (green context)
-    # the second two paths are from 0.0 graph (red context)
-    X = [
-        [[1],[3],[5]],
-        [[1],[4],[5]],
-        [[2],[4],[6]],
-        [[2],[3],[6]]
-        ]
     return X
 
   def dataset_onesent(self,path,filler_id,depth=1):
@@ -102,7 +92,27 @@ class CSWTask():
     Y = slice_and_stride(Y,depth)
     return X,Y
 
-  def dataset_fullstory(self,path,depth=1):
+  """ 
+  full story, no filler marker
+  consumes a state at a time, making predictions as it goes
+  """
+
+  def Xfull_onestory_det(self):
+    """
+    only evaluate on high probability paths
+    returns X, shape: (samples=2,depth=3,len=1)
+    """
+    # the first two paths are from 1.0 graph (green context)
+    # the second two paths are from 0.0 graph (blue context)
+    X = [
+        [[1],[3],[5]],
+        [[1],[4],[5]],
+        [[2],[4],[6]],
+        [[2],[3],[6]]
+        ]
+    return X
+
+  def dataset_onestory(self,path,depth=1):
     """ 
     given a path `arr` 
     returns:
@@ -114,6 +124,31 @@ class CSWTask():
     """
     X = path[1:-2]
     Y = path[2:-1]
+    X = np.vstack([X]).transpose()
+    Y = np.vstack([Y]).transpose()
+    X = slice_and_stride(X,depth)
+    Y = slice_and_stride(Y,depth)
+    return X,Y
+
+  """ full story with graph flag
+  as in onestory, but filler_id given as first sample
+  the number of input patterns is too large to 
+	  make evaluating on all alternatives feasable.
+	  instead, I'll change the main loop function
+	  to take in a number of paths to evaluate on.
+  """
+
+  def dataset_onestory_with_marker(self,path,filler_id,depth=1):
+    """ 
+    given a path `arr` and filler_id `int`
+    returns:
+      X = [[[begin,id,st(t),st(t+1)],],]
+      Y = [[[id,st(t+1),f1(t+1)],],]
+      shape: (samples,depth,len)
+    """
+    path = np.insert(path,1,filler_id)
+    X = path[0:-2]
+    Y = path[1:-1]
     X = np.vstack([X]).transpose()
     Y = np.vstack([Y]).transpose()
     X = slice_and_stride(X,depth)

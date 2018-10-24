@@ -9,6 +9,7 @@ RNNs define task structure
 def basicRNN(self,depth,in_len,out_len):
   """ 
   self: a tensorflow graph 
+  consumes a sentence at a time
   RNN structure:
     takes in state and a filler
     returns prediction for next state and a filler
@@ -49,6 +50,7 @@ def basicRNN(self,depth,in_len,out_len):
 def RNN_onesent(self,depth,in_len,out_len):
   """ 
   self: a tensorflow graph 
+  consumes a story at a time
   RNN structure:
     takes in state and a filler
     returns prediction for next state and a filler
