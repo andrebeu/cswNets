@@ -6,23 +6,31 @@ RNNs define task structure
 
 ### RNNs
 
-def basicRNN(self,depth,in_len,out_len):
+def basicRNN(tfGraph,depth,in_len,out_len):
   """ 
-  self: a tensorflow graph 
+  - tfGraph: 
+      this awkward syntax allows modularizing RNNs
+
+  general RNN structure that allows specifying 
+    - depth: number of (input_seq,output_seq) that are unrolled
+    - in_len: length of each input sequence
+    - out_len: length of each output sequence
   consumes a sentence at a time
+    
   RNN structure:
     takes in state and a filler
     returns prediction for next state and a filler
   returns unscaled logits
   """
-  xbatch = self.xbatch
-  cell = self.cell
+  xbatch = tfGraph.xbatch
+  cell = tf.contrib.rnn.LayerNormBasicLSTMCell(
+          tfGraph.rnn_size,dropout_keep_prob=tfGraph.dropout_keep_prob)
 
-  xbatch = tf.layers.dense(xbatch,self.rnn_size,tf.nn.relu,name='inproj')
+  xbatch = tf.layers.dense(xbatch,tfGraph.rnn_size,tf.nn.relu,name='inproj')
   # unroll RNN
   with tf.variable_scope('RNN_SCOPE') as cellscope:
     # initialize state
-    initial_state = state = cell.zero_state(tf.cast(self.batch_size_ph,tf.int32),tf.float32)
+    initial_state = state = cell.zero_state(tf.cast(tfGraph.batch_size_ph,tf.int32),tf.float32)
     # unroll
     outputL = []
     for unroll_step in range(depth):
@@ -42,7 +50,7 @@ def basicRNN(self,depth,in_len,out_len):
   # format for y_hat
   outputs = tf.stack(outputL,axis=1)
   # project to unscaled logits (to that outdim = num_classes)
-  outputs = tf.layers.dense(outputs,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
+  outputs = tf.layers.dense(outputs,tfGraph.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
   return outputs
 
 

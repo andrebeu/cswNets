@@ -110,7 +110,7 @@ class CSWTask():
         [[2],[4],[6]],
         [[2],[3],[6]]
         ]
-    return X
+    return np.array(X)
 
   def dataset_onestory(self,path,depth=1):
     """ 
@@ -146,7 +146,7 @@ class CSWTask():
       Y = [[[id,st(t+1),f1(t+1)],],]
       shape: (samples,depth,len)
     """
-    path = np.insert(path,1,filler_id)
+    path = np.insert(path,0,filler_id)
     X = path[0:-2]
     Y = path[1:-1]
     X = np.vstack([X]).transpose()
@@ -155,6 +155,15 @@ class CSWTask():
     Y = slice_and_stride(Y,depth)
     return X,Y
 
+  def format_Xeval(self,pathL):
+    """
+    given a list of paths [[0,10,1,3,5],[0,11,2,4,6]]
+    returns an array with format expected by Trainer.predict_step
+      (num_samples,depth,in_len)
+    """
+    Xeval = np.array(pathL)
+    Xeval = np.expand_dims(Xeval,2)
+    return Xeval
 
 def slice_and_stride(X,depth=1):
   """ 

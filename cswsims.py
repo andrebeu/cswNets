@@ -3,7 +3,8 @@ import tensorflow as tf
 import RNNs
 from CSW import CSWTask 
 
-""" GOAL
+""" 
+GOAL
 
 WORKFLOW: train & eval, save and restore data, analyze. 
 
@@ -11,6 +12,12 @@ separating RNNs allow me to modularize different tasks
 separating trainers allows me to not have to rebuild graph every time 
 
 NB depth == unroll_depth
+
+----
+TODO
+
+number of possible inputs is too large to eval on everything
+instead I'll change main_loop to take in an array of eval sequences 
 """
 
 
@@ -41,14 +48,12 @@ class NetGraph():
     with self.graph.as_default():
       # place holders
       self.setup_placeholders()
-      # cell and task
-      self.cell = tf.contrib.rnn.LayerNormBasicLSTMCell(self.rnn_size,dropout_keep_prob=self.dropout_keep_prob)
-      
       # pipeline
       self.xbatch_id,self.ybatch_id = self.data_pipeline() # x(batches,bptt,in_tstep), y(batch,bptt,out_tstep)
-      ## inference
+      ## embedding 
       self.embed_mat = tf.get_variable('embedding_matrix',[self.num_classes,self.embed_dim])
       self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,in_len,in_dim
+      ## inference
       self.unscaled_logits = self.RNN(self,self.depth,self.in_len,self.out_len) # batch,bptt*out_len,num_classes
       # awkward syntax allows me to modularize RNNs
       ## loss
@@ -214,12 +219,16 @@ class Trainer():
         pred_data_L.append(pred_data)
     return pred_data_L
 
-  def main_loop(self,curricula):
+  def main_loop(self,curricula,XevalL):
     """ 
+     - curricula: [(nblocks,epb),()]
+        list of tuples, each is a curriculum.
+     - XevalL: [path1,path2]
+        list of paths to eval on.
     this loop trains on multiple curricula: each curriculum 
-      specifies number of blocks and epochs_per_block
+      specifies number of blocks and epochs_per_block.
     there are two contexts, in each block the network is trained 
-      on single context but always makes predictions on both. 
+      on single context. 
 
     return: 
       pred_data['yhat'], shape: (epochs,path,depth,len,num_classes)
@@ -228,13 +237,13 @@ class Trainer():
     task = CSWTask()
     graphs = [task.get_graph(self.graphpr),task.get_graph(1-self.graphpr)]
     graphids = [10,11]
-    # prediction dataset
-    Xfull = task.Xfull_onestory_det()
+    # eval data
+    Xeval = task.format_Xeval(XevalL)
     # array for recording data
     total_num_evals = 0
     for nb,epb in curricula: total_num_evals += nb*epb
-    pred_array_dtype = [('xbatch','int32',(len(Xfull),self.net.depth,self.net.in_len)),
-                        ('yhat','float32',(len(Xfull),self.net.depth,self.net.out_len,
+    pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth,self.net.in_len)),
+                        ('yhat','float32',(len(Xeval),self.net.depth,self.net.out_len,
                                             self.net.num_classes))]
     pred_data = np.zeros((total_num_evals), dtype=pred_array_dtype)
     # main loop
@@ -249,11 +258,11 @@ class Trainer():
         for ep in range(epb):
           # train step
           path = task.gen_single_path(graph)
-          Xtrain,Ytrain = task.dataset_onestory(path,depth=DEPTH)
+          Xtrain,Ytrain = task.dataset_onestory_with_marker(path,filler_id=graphid,depth=DEPTH)
           self.train_step(Xtrain,Ytrain)
           # predict and eval
           eval_idx += 1
-          predstep_data = self.predict_step(Xfull,Xfull)
+          predstep_data = self.predict_step(Xeval,Xeval)
           pred_data[eval_idx] = predstep_data
     return pred_data
 
