@@ -165,6 +165,8 @@ class CSWTask():
     Xeval = np.expand_dims(Xeval,2)
     return Xeval
 
+
+
 def slice_and_stride(X,depth=1):
   """ 
   useful for including BPTT dim: 
