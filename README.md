@@ -1,7 +1,9 @@
-# cswNets: manystories
+# cswNets: meta learning
 
-Beginning Nov 12, 2018
+Beginning Feb 08, 2019
 
-In previous simulations, networks consumed a story at a time. That is, the cell state was flushed to zero after every story.
+In previous simulations, networks mostly backproped one story at a time. Eventhough in 'manystories' I carried the cell state forward between different epochs, I continued to only forward and backprop one story at a time. 
 
-The current simulations will allow cell states to carry forawrd between different stories. At the beginning of training, cell state will be initialized to zero. I will forward prop and apply learning one story at a time. But I will save the cell state at the end of this forward prop and carry it forward into the next story. 
+Here we setup a metalearning problem, where the network trains in an environment where it receives k stories at a time, and there is a probability that the next story will be from the same versus a different graph. the question we are interested in is whether networks can meta-learn to use prediction error as a signal that the context has changed. some ideas include
+- comapre networks that recieve prediction error as input to the cell, against networks that don't: the idea being that networks might be able to compute the prediction error in the cell state once the desired output for the previous timestep is made available as an input as is common in ML. we could even look for whether the network learns to comute such a prediction error.
+
