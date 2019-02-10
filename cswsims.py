@@ -3,25 +3,24 @@ import tensorflow as tf
 from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
 
-
 NUM_STORIES = 2
 DEPTH = NUM_STORIES*7
 TRAIN_BATCH_SIZE = 1
-# NUM_STORIES = 2
+
 
 class NetGraph():
 
-  def __init__(self,rnn_size,random_seed=1):
+  def __init__(self,stsize,depth,random_seed=1):
     """
     """
     self.graph = tf.Graph()
     self.sess = tf.Session(graph=self.graph)
     self.random_seed = random_seed
     # dimensions
-    self.rnn_size = rnn_size
-    self.embed_dim = rnn_size
+    self.stsize = stsize
+    self.embed_dim = stsize
     self.depth = DEPTH 
-    self.in_len = 1
+    self.in_len = 2
     self.out_len = 1
     self.num_classes = 12
     # build
@@ -68,7 +67,7 @@ class NetGraph():
                                 shape=[],
                                 name="dropout_ph")
     self.cellstate_ph = tf.placeholder(tf.float32,
-                  shape=[None,self.rnn_size],
+                  shape=[None,self.stsize],
                   name = "initialstate_ph")
     return None
 
@@ -113,8 +112,8 @@ class NetGraph():
     """
     xbatch = self.xbatch
     cell = self.cell = CustomLSTM(
-            self.rnn_size,dropout_keep_prob=self.dropout_keep_prob)
-    xbatch = tf.layers.dense(xbatch,self.rnn_size,tf.nn.relu,name='inproj')
+            self.stsize,dropout_keep_prob=self.dropout_keep_prob)
+    xbatch = tf.layers.dense(xbatch,self.stsize,tf.nn.relu,name='inproj')
     # unroll RNN
     with tf.variable_scope('RNN_SCOPE') as cellscope:
       # initialize state
@@ -147,7 +146,6 @@ class NetGraph():
     # project to unscaled logits (to that outdim = num_classes)
     outputs = tf.layers.dense(outputs,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
     return outputs,state,states
-
 
 
 
@@ -195,8 +193,8 @@ class Trainer():
     # initialize data datastructure for collecting data
     pred_array_dtype = [('xbatch','int32',(batch_size,self.net.depth,self.net.in_len)),
                         ('yhat','float32',(batch_size,self.net.depth,self.net.out_len,self.net.num_classes)),
-                        ('states','float32',(batch_size,self.net.depth*2,self.net.rnn_size)),
-                        ('fgate','float32',(batch_size,self.net.depth*2,self.net.rnn_size))
+                        ('states','float32',(batch_size,self.net.depth*2,self.net.stsize)),
+                        ('fgate','float32',(batch_size,self.net.depth*2,self.net.stsize))
                         ]
     pred_data_arr = np.zeros((),dtype=pred_array_dtype)
     # feed dict
@@ -248,12 +246,12 @@ class Trainer():
     for nb,epb in curricula: total_num_evals += nb*epb
     pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth,self.net.in_len)),
                         ('yhat','float32',(len(Xeval),self.net.depth,self.net.out_len,self.net.num_classes)),
-                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.rnn_size)),
-                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.rnn_size))
+                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.stsize)),
+                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.stsize))
                         ]
     pred_data = np.zeros((total_num_evals), dtype=pred_array_dtype)
     # initial cell_state
-    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.rnn_size])
+    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.stsize])
     ## MAIN LOOP
     eval_idx = -1
     for nblocks,epb in curricula:
@@ -300,12 +298,12 @@ class Trainer():
     # eval data array
     pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth,self.net.in_len)),
                         ('yhat','float32',(len(Xeval),self.net.depth,self.net.out_len,self.net.num_classes)),
-                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.rnn_size)),
-                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.rnn_size))
+                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.stsize)),
+                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.stsize))
                         ]
     pred_data = np.zeros((num_epochs), dtype=pred_array_dtype)
     # init cell state
-    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.rnn_size])
+    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.stsize])
     # train loop
     for ep in range(num_epochs):
       if curr == 'interleave':
@@ -327,6 +325,9 @@ class Trainer():
     return pred_data
 
 
+""" CSWML TASK
+read 10 stories, adjacent stories are from different graphs w.p. pr_shift
+"""
 
 class CSWTask():
 
@@ -370,45 +371,27 @@ class CSWTask():
     path.append(self.end_node)
     return np.array(path)
 
-  """ POMDP: full story with graph flag
-  as in onestory, but filler_id given as first sample
-  the number of input patterns is too large to 
-    make evaluating on all alternatives feasable.
-    so I included in main_loop an argument that 
-    takes in a list of paths to eval on during training
-  """
-
-  def gen_pathL(self,k,graphA,graphB):
+  def gen_pathL(self,k,graphA,graphB,pr_shift):
     """ 
     generates k paths fully interleaving graphA and graphB
     returns a list, each item being a path
     """
     graphs = [graphA,graphB]
+    graphids = [10,11]
     pathL = []
+    graphidL = []
+    idx = 0
     for i in range(k):
-      graph = graphs[i%2]
+      if np.random.binomial(1,pr_shift):
+        print('SHIFTING')
+        idx = (idx+1)%2
+      graph = graphs[idx]
       path = self.gen_single_path(graph)
+      graphidL.append(graphids[idx])
       pathL.append(path)
-    return pathL
+    return pathL,graphidL
 
-  def dataset_onestory_pomdp_marker(self,path,filler_id,depth=1):
-    """ 
-    given a path `arr` and filler_id `int`
-    returns:
-      X = [[[begin,id,st(t),st(t+1)],],]
-      Y = [[[id,st(t+1),f1(t+1)],],]
-      shape: (samples,depth,len)
-    """
-    path = np.insert(path,0,filler_id)
-    X = path[0:-2]
-    Y = path[1:-1]
-    X = np.vstack([X]).transpose()
-    Y = np.vstack([Y]).transpose()
-    X = self.slice_and_stride(X,depth)
-    Y = self.slice_and_stride(Y,depth)
-    return X,Y
-
-  def dataset_kstories_pomdp(self,pathL,graphidL):
+  def dataset_kstories(self,pathL,graphidL):
     """
     given a pathL `list of arr` and graphidL `list of int`
     returns:
@@ -421,7 +404,7 @@ class CSWTask():
     kpaths = np.expand_dims(kpaths,1)
     kpaths = np.expand_dims(kpaths,0)
     X = kpaths
-    Y = np.roll(X,-1)
+    Y = np.roll(Xt,-1)
     return X,Y
 
   def format_Xeval(self,pathL):
@@ -436,17 +419,3 @@ class CSWTask():
 
   def format_Xeval_kstories(self,pathL,num_stories):
     return None
-
-  def slice_and_stride(self,X,depth=1):
-    """ 
-    useful for including BPTT dim: 
-      given (batch,in_len) 
-      returns (batch,depth,in_len)
-    stride step fixed to = 1
-    tf.sliding_window_batch d/n support stride=depth=1
-    """
-    Xstr = []
-    for idx in range(len(X)-depth+1):
-      x = X[idx:idx+depth]
-      Xstr.append(x)
-    return np.array(Xstr)
