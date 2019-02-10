@@ -4,11 +4,12 @@ from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
 
 NUM_STORIES = 2
-DEPTH = NUM_STORIES*7
 TRAIN_BATCH_SIZE = 1
 
 
-class NetGraph():
+## NB depth should be 7*nstories
+
+class MetaLearner():
 
   def __init__(self,stsize,depth,random_seed=1):
     """
@@ -19,9 +20,7 @@ class NetGraph():
     # dimensions
     self.stsize = stsize
     self.embed_dim = stsize
-    self.depth = DEPTH 
-    self.in_len = 2
-    self.out_len = 1
+    self.depth = depth 
     self.num_classes = 12
     # build
     self.build()
@@ -33,14 +32,14 @@ class NetGraph():
       # place holders
       self.setup_placeholders()
       # pipeline
-      self.xbatch_id,self.ybatch_id = self.data_pipeline() # x(batches,bptt,in_tstep), y(batch,bptt,out_tstep)
+      self.xbatch_id,self.ybatch_id = self.data_pipeline() # x(batches,bptt), y(batch,bptt)
       ## embedding 
       self.embed_mat = tf.get_variable('embedding_matrix',[self.num_classes,self.embed_dim])
-      self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,in_len,in_dim
+      self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,stsize
       ## inference
-      self.unscaled_logits,self.final_cell_state_op,self.states = self.RNN(self.depth,self.in_len,self.out_len) # batch,bptt*out_len,num_classes
+      self.unscaled_logits,self.final_cell_state_op,self.states = self.RNN() # batch,bptt,nclasses
       ## loss
-      self.ybatch_onehot = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,out_len,num_classes
+      self.ybatch_onehot = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                           labels=self.ybatch_onehot,logits=self.unscaled_logits)
       print("SGD01")
@@ -55,10 +54,10 @@ class NetGraph():
 
   def setup_placeholders(self):
     self.xph = xph = tf.placeholder(tf.int32,
-                  shape=[None,self.depth,self.in_len],
+                  shape=[None,self.depth],
                   name="xdata_placeholder")
     self.yph = yph = tf.placeholder(tf.int32,
-                  shape=[None,self.depth,self.out_len],
+                  shape=[None,self.depth],
                   name="ydata_placeholder")
     self.batch_size_ph = tf.placeholder(tf.int64,
                   shape=[],
@@ -97,7 +96,7 @@ class NetGraph():
       self.sess.run(tf.global_variables_initializer())
     return None
 
-  def RNN(self,depth,in_len,out_len):
+  def RNN(self):
     """ 
     general RNN structure that allows specifying 
       - depth: number of (input_seq,output_seq) that are unrolled
@@ -121,24 +120,18 @@ class NetGraph():
       initstate = state = tf.nn.rnn_cell.LSTMStateTuple(self.cellstate_ph,self.cellstate_ph)
       # unroll
       outputL,stateL,fgateL = [],[],[]
-      for unroll_step in range(depth):
-        xroll = xbatch[:,unroll_step,:,:]
+      zero_input = tf.zeros_like(xbatch[:,0,:])
+      for tstep in range(self.depth):
         # input
-        for in_tstep in range(in_len):
-          __,state = cell(xroll[:,in_tstep,:], state)
-          stateL.append(state[0])
-          fgateL.append(cell.forget_act)
-          cellscope.reuse_variables()
+        __,state = cell(xbatch[:,tstep,:], state)
+        stateL.append(state[0])
+        fgateL.append(cell.forget_act)
+        cellscope.reuse_variables()
         # output: inputs are zeroed out
-        outputs_rs = []
-        for out_tstep in range(out_len):
-          zero_input = tf.zeros_like(xroll)
-          cell_output, state = cell(zero_input[:,out_tstep,:], state) 
-          outputs_rs.append(cell_output)
-          stateL.append(state[0])
-          fgateL.append(cell.forget_act)
-        outputs_rollstep = tf.stack(outputs_rs,axis=1)
-        outputL.append(outputs_rollstep)
+        output,state = cell(zero_input, state) 
+        stateL.append(state[0])
+        fgateL.append(cell.forget_act)
+        outputL.append(output)
     # format for y_hat
     outputs = tf.stack(outputL,axis=1)
     states = tf.stack(stateL,axis=1)
@@ -151,9 +144,9 @@ class NetGraph():
 
 class Trainer():
 
-  def __init__(self,csw_net,graphpr):
-    self.net = csw_net
-    self.graphpr = graphpr
+  def __init__(self,net):
+    self.net = net
+    self.graphpr = 0.8
     return None
 
   # steps: single pass through dataset
@@ -220,68 +213,6 @@ class Trainer():
         break 
     return pred_data_arr
 
-  def train_single_unroll(self,curricula,XevalL,flushing,random_interleave=False):
-    """ 
-    this loop trains on multiple curricula: each curriculum 
-      specifies number_of_blocks and epochs_per_block.
-    there are two contexts, in each block the network is trained 
-      on single context. 
-
-    - curricula: [(num_blocks,epb),()]
-        list of tuples, each is a curriculum.
-    - XevalL: [path1,path2]
-        list of paths to eval on. each path is itself a list. 
-    return: 
-      pred_data['yhat'], shape: (epochs,path,depth,len,num_classes)
-    """
-    ## SETUP
-    # task: two graphs two filler ids
-    task = CSWTask()
-    graphs = [task.get_graph(self.graphpr),task.get_graph(1-self.graphpr)]
-    graphids = [10,11]
-    # eval data
-    Xeval = task.format_Xeval(XevalL)
-    # array for recording data
-    total_num_evals = 0
-    for nb,epb in curricula: total_num_evals += nb*epb
-    pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth,self.net.in_len)),
-                        ('yhat','float32',(len(Xeval),self.net.depth,self.net.out_len,self.net.num_classes)),
-                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.stsize)),
-                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.stsize))
-                        ]
-    pred_data = np.zeros((total_num_evals), dtype=pred_array_dtype)
-    # initial cell_state
-    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.stsize])
-    ## MAIN LOOP
-    eval_idx = -1
-    for nblocks,epb in curricula:
-      print('curriculum',(nblocks,epb))
-      for block in range(nblocks):
-        if random_interleave:
-          blockid = np.random.randint(2)
-        else:
-          blockid = block%2
-        graph = graphs[blockid]
-        graphid = graphids[blockid]
-        # print('block',block)
-        for ep in range(epb):
-          # training step
-          path = task.gen_single_path(graph)
-          Xtrain,Ytrain = task.dataset_onestory_pomdp_marker(path,filler_id=graphid,depth=DEPTH)
-          train_step_data,cell_state = self.train_step(Xtrain,Ytrain,cell_state)
-          # cell state
-          if str(flushing) == 'rand':
-            cell_state = np.random.random([*zero_cell_state.shape])
-          elif flushing:
-            cell_state = zero_cell_state 
-          else:
-            cell_state = cell_state[0]
-          # prediction 
-          eval_idx += 1
-          pred_step_data = self.predict_step(Xeval,Xeval,cell_state)
-          pred_data[eval_idx] = pred_step_data
-    return pred_data
-
   def train_multi_unroll(self,num_epochs,XevalL,num_stories=NUM_STORIES,curr='interleave'):
     """ 
     currently just unrolling two stories
@@ -329,9 +260,11 @@ class Trainer():
 read 10 stories, adjacent stories are from different graphs w.p. pr_shift
 """
 
-class CSWTask():
+class CSWMLTask():
 
-  def __init__(self):
+  def __init__(self,graph_pr):
+    self.graphA = self.get_graph(graph_pr)
+    self.graphB = self.get_graph(1-graph_pr)
     self.end_node = 9
 
   def get_graph(self,graph_pr):
@@ -371,16 +304,16 @@ class CSWTask():
     path.append(self.end_node)
     return np.array(path)
 
-  def gen_pathL(self,k,graphA,graphB,pr_shift):
+  def gen_pathL(self,k,pr_shift):
     """ 
     generates k paths fully interleaving graphA and graphB
     returns a list, each item being a path
     """
-    graphs = [graphA,graphB]
+    graphs = [self.graphA,self.graphB]
     graphids = [10,11]
     pathL = []
     graphidL = []
-    idx = 0
+    idx = np.random.binomial(1,.5) 
     for i in range(k):
       if np.random.binomial(1,pr_shift):
         print('SHIFTING')
@@ -397,25 +330,11 @@ class CSWTask():
     returns:
       X = [[[begin,id,st(t),st(t+1)],],]
       Y = [[[id,st(t+1),f1(t+1)],],]
-      shape: (samples,depth,len)
+      shape: (samples,depth)
     """
     num_paths = len(pathL)
     kpaths = np.concatenate([np.insert(pathL[i],0,graphidL[i]) for i in range(num_paths)])
-    kpaths = np.expand_dims(kpaths,1)
     kpaths = np.expand_dims(kpaths,0)
     X = kpaths
-    Y = np.roll(Xt,-1)
+    Y = np.roll(X,-1)
     return X,Y
-
-  def format_Xeval(self,pathL):
-    """
-    given a list of paths [[0,10,1,3,5],[0,11,2,4,6]]
-    returns an array with format expected by Trainer.predict_step
-      (num_samples,depth,in_len)
-    """
-    Xeval = np.array(pathL)
-    Xeval = np.expand_dims(Xeval,2)
-    return Xeval
-
-  def format_Xeval_kstories(self,pathL,num_stories):
-    return None
