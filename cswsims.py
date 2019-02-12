@@ -3,15 +3,15 @@ import tensorflow as tf
 from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
 
-NUM_STORIES = 2
 TRAIN_BATCH_SIZE = 1
+
 
 
 ## NB depth should be 7*nstories
 
 class MetaLearner():
 
-  def __init__(self,stsize,depth,random_seed=1):
+  def __init__(self,stsize,nstories,random_seed=1):
     """
     """
     self.graph = tf.Graph()
@@ -20,7 +20,8 @@ class MetaLearner():
     # dimensions
     self.stsize = stsize
     self.embed_dim = stsize
-    self.depth = depth 
+    self.nstories = nstories
+    self.depth = 7*nstories 
     self.num_classes = 12
     # build
     self.build()
@@ -140,13 +141,16 @@ class MetaLearner():
     outputs = tf.layers.dense(outputs,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
     return outputs,state,states
 
+""" 
 
+"""
 
 class Trainer():
 
-  def __init__(self,net):
+  def __init__(self,net,shift_pr,graph_pr):
     self.net = net
-    self.graphpr = 0.8
+    self.graph_pr = graph_pr
+    self.shift_pr = shift_pr
     return None
 
   # steps: single pass through dataset
@@ -154,7 +158,6 @@ class Trainer():
   def train_step(self,Xtrain,Ytrain,cell_state):
     """ updates model parameters using Xtrain,Ytrain
     """
-    
     # initialize iterator with train data
     train_feed_dict = {
       self.net.xph: Xtrain,
@@ -167,33 +170,35 @@ class Trainer():
     # train loop
     while True:
       try:
-        train_step_data,new_cell_state = self.net.sess.run(
+        _,new_cell_state = self.net.sess.run(
           [self.net.minimizer_op,self.net.final_cell_state_op],feed_dict=train_feed_dict)
         # print(loss)
       except tf.errors.OutOfRangeError:
         break
-    return train_step_data,new_cell_state
+    return new_cell_state
 
-  def predict_step(self,Xpred,Ypred,cell_state):
+  def eval_step(self,Xeval,Yeval,cell_state=None):
     """ makes predictions on full dataset
     currently predictions are made on both contexts using same embedding
     ideally i could make predictions on each context independently 
     so that could make predictions with the appropriate embedding
     """
-    batch_size = len(Xpred)
+    batch_size = len(Xeval)
+    if type(cell_state) == type(None):
+      cell_state = np.zeros([1,self.net.stsize])
     # repeat cell state for each prediction
     cell_state = np.repeat(cell_state,batch_size,axis=0)
     # initialize data datastructure for collecting data
-    pred_array_dtype = [('xbatch','int32',(batch_size,self.net.depth,self.net.in_len)),
-                        ('yhat','float32',(batch_size,self.net.depth,self.net.out_len,self.net.num_classes)),
+    pred_array_dtype = [('xbatch','int32',(batch_size,self.net.depth)),
+                        ('yhat','float32',(batch_size,self.net.depth,self.net.num_classes)),
                         ('states','float32',(batch_size,self.net.depth*2,self.net.stsize)),
                         ('fgate','float32',(batch_size,self.net.depth*2,self.net.stsize))
                         ]
-    pred_data_arr = np.zeros((),dtype=pred_array_dtype)
+    eval_data_arr = np.zeros((),dtype=pred_array_dtype)
     # feed dict
     pred_feed_dict = {
-      self.net.xph:Xpred,
-      self.net.yph:Ypred,
+      self.net.xph:Xeval,
+      self.net.yph:Yeval,
       self.net.batch_size_ph: batch_size,
       self.net.dropout_keep_prob: 1.0,
       self.net.cellstate_ph: cell_state
@@ -205,59 +210,48 @@ class Trainer():
       try:
         xbatch,yhat,states,fgate = self.net.sess.run(
           [self.net.xbatch_id,self.net.yhat_sm,self.net.states,self.net.fgate],feed_dict=pred_feed_dict)
-        pred_data_arr['xbatch'] = xbatch
-        pred_data_arr['yhat'] = yhat
-        pred_data_arr['states'] = states
-        pred_data_arr['fgate'] = fgate
+        eval_data_arr['xbatch'] = xbatch
+        eval_data_arr['yhat'] = yhat
+        eval_data_arr['states'] = states
+        eval_data_arr['fgate'] = fgate
       except tf.errors.OutOfRangeError:
         break 
-    return pred_data_arr
+    return eval_data_arr
 
-  def train_multi_unroll(self,num_epochs,XevalL,num_stories=NUM_STORIES,curr='interleave'):
+  def train_loop(self,nepochs):
     """ 
-    currently just unrolling two stories
-    blocked is AA,BB,AA
-    interleave is AB,AB,AB
     """
+    nevals = nepochs
     # setup task vars
-    task = CSWTask()
-    graph0 = task.get_graph(self.graphpr)
-    graph1 = task.get_graph(1-self.graphpr)
-    graphids = [10,11]
-    graphidL = [graphids[i%2] for i in range(num_stories)] 
-    Xeval = task.format_Xeval(XevalL)
-    # eval data array
-    pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth,self.net.in_len)),
-                        ('yhat','float32',(len(Xeval),self.net.depth,self.net.out_len,self.net.num_classes)),
+    task = CSWMLTask(self.graph_pr)
+
+    ## setup eval data array
+    Xeval = task.get_Xeval() # hand writen eval sequences
+    pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth)),
+                        ('yhat','float32',(len(Xeval),self.net.depth,self.net.num_classes)),
                         ('states','float32',(len(Xeval),self.net.depth*2,self.net.stsize)),
                         ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.stsize))
                         ]
-    pred_data = np.zeros((num_epochs), dtype=pred_array_dtype)
-    # init cell state
+    eval_data = np.zeros((nevals), dtype=pred_array_dtype)
+    ## init cell state
     zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.stsize])
     # train loop
-    for ep in range(num_epochs):
-      if curr == 'interleave':
-        graphA = graph0
-        graphB = graph1
-      elif curr == 'block':
-        if ep%2 == 0:
-          graphA = graphB = graph0
-        else:
-          graphA = graphB = graph1
+    for ep in range(nepochs):
       # train step
-      pathL = task.gen_pathL(num_stories,graphA,graphB)
-      Xtrain,Ytrain = task.dataset_kstories_pomdp(pathL,graphidL)
-      train_step_data,cell_state = self.train_step(Xtrain,Ytrain,cell_state)
-      cell_state = cell_state[0]
+      pathL,graphidL = task.gen_pathL(self.net.nstories,self.shift_pr)
+      Xtrain,Ytrain = task.dataset_kstories(pathL,graphidL)
+      cell_state = self.train_step(Xtrain,Ytrain,cell_state)
+      cell_state = cell_state[0] # only c-state
       # eval
-      pred_step_data = self.predict_step(Xeval,Xeval,cell_state)
-      pred_data[ep] = pred_step_data
-    return pred_data
+      pred_step_data = self.eval_step(Xeval,Xeval,cell_state)
+      eval_data[ep] = pred_step_data
+      if ep%(nepochs/20)==0:
+        print(100*ep/nepochs)
+    return eval_data
 
 
-""" CSWML TASK
-read 10 stories, adjacent stories are from different graphs w.p. pr_shift
+""" CSW METALEARNING TASK
+adjacent stories are from different graphs w.p. pr_shift
 """
 
 class CSWMLTask():
@@ -316,7 +310,6 @@ class CSWMLTask():
     idx = np.random.binomial(1,.5) 
     for i in range(k):
       if np.random.binomial(1,pr_shift):
-        print('SHIFTING')
         idx = (idx+1)%2
       graph = graphs[idx]
       path = self.gen_single_path(graph)
@@ -338,3 +331,22 @@ class CSWMLTask():
     X = kpaths
     Y = np.roll(X,-1)
     return X,Y
+
+  def get_Xeval2(self,context_str):
+    D = {'A':[[0, 2, 4, 6, 8, 9],10],'B':[[0, 2, 3, 6, 7, 9],11]}
+    pathL = D[context_str[0]][0],D[context_str[1]][0],D[context_str[2]][0]
+    graphidL = D[context_str[0]][1],D[context_str[1]][1],D[context_str[2]][1]
+    Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
+    return Xeval,Yeval
+
+  def get_Xeval(self):
+    """
+    assumes nstories = 3 
+    first path is no graph shift 10 10 10
+    second path is graph shift in middle 10 11 10
+    """
+    pathL_eval1 = [[0, 2, 4, 6, 8, 9],[0, 2, 4, 6, 8, 9],[0, 2, 4, 6, 8, 9]] # [10,10,10]
+    pathL_eval2 = [[0, 2, 4, 6, 8, 9],[0, 2, 3, 6, 7, 9],[0, 2, 4, 6, 8, 9]] # [10,11,10]
+    Xeval1,Yeval = self.dataset_kstories(pathL_eval1,[10,10,10])
+    Xeval2,Yeval = self.dataset_kstories(pathL_eval2,[10,11,10])
+    return np.concatenate([Xeval1,Xeval2])
