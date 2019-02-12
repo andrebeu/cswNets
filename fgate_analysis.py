@@ -1,8 +1,12 @@
+import sys
 import numpy as np
 from glob import glob as glob
 
 from cswsims import *
 import tensorflow as tf
+
+
+shiftpr = int(sys.argv[1])/100
 
 # model params
 lstm_size = 50 
@@ -10,7 +14,7 @@ nstories = 3
 # task/training params
 nepochs = 10000
 graphpr = 1
-shiftpr = 0.5
+
 seqL = ['AAA','ABA','BAA','BBA']
 
 nnets = 10
