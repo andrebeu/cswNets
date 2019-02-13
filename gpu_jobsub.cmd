@@ -21,6 +21,7 @@ module load openmpi/gcc/2.1.0/64 # srm
 printf "\n\n NBack Task \n\n"
 
 
+
 srun python -u "/tigress/abeukers/wd/cswNets/fgate_analysis.py" ${PRSHIFT} 
 
 
