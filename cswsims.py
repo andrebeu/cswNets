@@ -5,7 +5,11 @@ from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
 TRAIN_BATCH_SIZE = 1
 
+"""
+also save cell state trajectory during eval
+change train & save file to save (1) model (2) train data (3) eval data at end of training
 
+"""
 
 ## NB depth should be 7*nstories
 
@@ -43,8 +47,8 @@ class MetaLearner():
       self.ybatch_onehot = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                           labels=self.ybatch_onehot,logits=self.unscaled_logits)
-      print("SGD01")
-      self.minimizer_op = tf.train.GradientDescentOptimizer(0.01).minimize(self.train_loss)
+      print("ADAM01")
+      self.minimizer_op = tf.train.AdamOptimizer(0.01).minimize(self.train_loss)
       ## accuracy
       self.yhat_sm = tf.nn.softmax(self.unscaled_logits)
       self.yhat_id = tf.argmax(self.yhat_sm,-1)
@@ -151,6 +155,7 @@ class Trainer():
     self.net = net
     self.graph_pr = graph_pr
     self.shift_pr = shift_pr
+    self.task = CSWMLTask(self.graph_pr)
     return None
 
   # steps: single pass through dataset
@@ -167,34 +172,31 @@ class Trainer():
       self.net.cellstate_ph: cell_state
       }
     self.net.sess.run([self.net.itr_initop],train_feed_dict)
-    # train loop
-    while True:
-      try:
-        _,new_cell_state = self.net.sess.run(
-          [self.net.minimizer_op,self.net.final_cell_state_op],feed_dict=train_feed_dict)
-        # print(loss)
-      except tf.errors.OutOfRangeError:
-        break
+    ## train step
+    _,new_cell_state = self.net.sess.run([
+                        self.net.minimizer_op,
+                        self.net.final_cell_state_op],
+                         feed_dict=train_feed_dict)
     return new_cell_state
 
-  def eval_step(self,Xeval,Yeval,cell_state=None):
+  def eval_step(self,Xeval,Yeval,cell_state='rand'):
     """ makes predictions on full dataset
     currently predictions are made on both contexts using same embedding
     ideally i could make predictions on each context independently 
     so that could make predictions with the appropriate embedding
     """
     batch_size = len(Xeval)
-    if type(cell_state) == type(None):
-      cell_state = np.zeros([1,self.net.stsize])
+    if cell_state == 'rand':
+      cell_state = np.random.random([1,self.net.stsize])
     # repeat cell state for each prediction
     cell_state = np.repeat(cell_state,batch_size,axis=0)
     # initialize data datastructure for collecting data
-    pred_array_dtype = [('xbatch','int32',(batch_size,self.net.depth)),
+    eval_array_dtype = [('xbatch','int32',(batch_size,self.net.depth)),
                         ('yhat','float32',(batch_size,self.net.depth,self.net.num_classes)),
                         ('states','float32',(batch_size,self.net.depth*2,self.net.stsize)),
                         ('fgate','float32',(batch_size,self.net.depth*2,self.net.stsize))
                         ]
-    eval_data_arr = np.zeros((),dtype=pred_array_dtype)
+    eval_data_arr = np.zeros((),dtype=eval_array_dtype)
     # feed dict
     pred_feed_dict = {
       self.net.xph:Xeval,
@@ -218,36 +220,53 @@ class Trainer():
         break 
     return eval_data_arr
 
+  def eval_loop1(self,context_strL):
+    """ 
+    evaluates on sequences generated from context_strL
+    """
+    eval_arr_dtype = [(context_str, [
+                        ('xbatch','int32',(1,self.net.depth)),
+                        ('yhat','float32',(1,self.net.depth,self.net.num_classes)),
+                        ('states','float32',(1,self.net.depth*2,self.net.stsize)),
+                        ('fgate','float32',(1,self.net.depth*2,self.net.stsize))
+                        ]) for context_str in context_strL]
+    eval_arr = np.zeros([],dtype=eval_arr_dtype)
+    for context_str in context_strL:
+      Xeval,Yeval = self.task.get_Xeval1(context_str)
+      evalstep_data = self.eval_step(Xeval,Yeval,cell_state='rand')
+      eval_arr[context_str] = evalstep_data
+    return eval_arr
+
   def train_loop(self,nepochs):
     """ 
     """
     nevals = nepochs
-    # setup task vars
-    task = CSWMLTask(self.graph_pr)
-
+    Xeval,Yeval = self.task.get_Xeval1('ABA')
+    print('training eval is on ABA')
     ## setup eval data array
-    Xeval = task.get_Xeval() # hand writen eval sequences
-    pred_array_dtype = [('xbatch','int32',(len(Xeval),self.net.depth)),
-                        ('yhat','float32',(len(Xeval),self.net.depth,self.net.num_classes)),
-                        ('states','float32',(len(Xeval),self.net.depth*2,self.net.stsize)),
-                        ('fgate','float32',(len(Xeval),self.net.depth*2,self.net.stsize))
+    eval_array_dtype = [('xbatch','int32',(TRAIN_BATCH_SIZE,self.net.depth)),
+                        ('yhat','float32',(TRAIN_BATCH_SIZE,self.net.depth,self.net.num_classes)),
+                        ('states','float32',(TRAIN_BATCH_SIZE,self.net.depth*2,self.net.stsize)),
+                        ('fgate','float32',(TRAIN_BATCH_SIZE,self.net.depth*2,self.net.stsize))
                         ]
-    eval_data = np.zeros((nevals), dtype=pred_array_dtype)
+    train_data = np.zeros((nevals), dtype=eval_array_dtype)
     ## init cell state
-    zero_cell_state = cell_state = np.zeros(shape=[TRAIN_BATCH_SIZE,self.net.stsize])
+    rand_cell_state = cell_state = np.random.random([TRAIN_BATCH_SIZE,self.net.stsize])
     # train loop
     for ep in range(nepochs):
-      # train step
-      pathL,graphidL = task.gen_pathL(self.net.nstories,self.shift_pr)
-      Xtrain,Ytrain = task.dataset_kstories(pathL,graphidL)
+      # generate data
+      pathL,graphidL = self.task.gen_pathL(self.net.nstories,self.shift_pr)
+      Xtrain,Ytrain = self.task.dataset_kstories(pathL,graphidL)
+      # eval network on data
+      trainstep_data = self.eval_step(Xeval,Yeval,cell_state)
+      train_data[ep] = trainstep_data
+      # update params
       cell_state = self.train_step(Xtrain,Ytrain,cell_state)
       cell_state = cell_state[0] # only c-state
       # eval
-      pred_step_data = self.eval_step(Xeval,Xeval,cell_state)
-      eval_data[ep] = pred_step_data
       if ep%(nepochs/20)==0:
         print(100*ep/nepochs)
-    return eval_data
+    return train_data.squeeze()
 
 
 """ CSW METALEARNING TASK
@@ -257,9 +276,10 @@ adjacent stories are from different graphs w.p. pr_shift
 class CSWMLTask():
 
   def __init__(self,graph_pr):
-    self.graphA = self.get_graph(graph_pr)
-    self.graphB = self.get_graph(1-graph_pr)
+    self.graphs = [self.get_graph(graph_pr),self.get_graph(1-graph_pr)]
     self.end_node = 9
+    # randomly initialize context
+    self.graph_idx = np.random.binomial(1,.5) # 0 or 1
 
   def get_graph(self,graph_pr):
     """ returns a dict which encodes graph
@@ -303,17 +323,16 @@ class CSWMLTask():
     generates k paths fully interleaving graphA and graphB
     returns a list, each item being a path
     """
-    graphs = [self.graphA,self.graphB]
     graphids = [10,11]
     pathL = []
     graphidL = []
-    idx = np.random.binomial(1,.5) 
     for i in range(k):
+      # w/pr pr_shift, change contexts
       if np.random.binomial(1,pr_shift):
-        idx = (idx+1)%2
-      graph = graphs[idx]
+        self.graph_idx = (self.graph_idx+1)%2
+      graph = self.graphs[self.graph_idx]
       path = self.gen_single_path(graph)
-      graphidL.append(graphids[idx])
+      graphidL.append(graphids[self.graph_idx])
       pathL.append(path)
     return pathL,graphidL
 
@@ -332,10 +351,13 @@ class CSWMLTask():
     Y = np.roll(X,-1)
     return X,Y
 
-  def get_Xeval2(self,context_str):
-    D = {'A':[[0, 2, 4, 6, 8, 9],10],'B':[[0, 2, 3, 6, 7, 9],11]}
-    pathL = D[context_str[0]][0],D[context_str[1]][0],D[context_str[2]][0]
-    graphidL = D[context_str[0]][1],D[context_str[1]][1],D[context_str[2]][1]
+  def get_Xeval1(self,context_str):
+    """ given a context_str (e.g. 'ABA') generates an eval dataset 
+    """
+    D = {'A':[[0, 2, 4, 6, 8, 9],10],
+         'B':[[0, 2, 3, 6, 7, 9],11]}
+    pathL = [D[context][0] for context in context_str]
+    graphidL = [D[context][1] for context in context_str]
     Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
     return Xeval,Yeval
 
