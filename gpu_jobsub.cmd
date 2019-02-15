@@ -22,7 +22,7 @@ printf "\n\n NBack Task \n\n"
 
 
 
-srun python -u "/tigress/abeukers/wd/cswNets/fgate_analysis.py" ${PRSHIFT} 
+srun python -u "/tigress/abeukers/wd/cswNets/trainsave.py" ${PRSHIFT} 
 
 
 printf "\n\nGPU profiling \n\n"

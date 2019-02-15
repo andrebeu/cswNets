@@ -12,9 +12,8 @@ shiftpr = int(sys.argv[1])/100
 stsize = 50 
 nstories = 3
 # task/training params
-nepochs = 5000
-graphpr = .9
-
+nepochs = 10000
+graphpr = 0.9
 
 
 ML = MetaLearner(stsize,nstories)
