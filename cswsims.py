@@ -4,7 +4,7 @@ from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
 
 
-NUM_STORIES = 2
+NUM_STORIES = 1
 DEPTH = NUM_STORIES*7
 TRAIN_BATCH_SIZE = 1
 # NUM_STORIES = 2
@@ -20,7 +20,7 @@ class NetGraph():
     # dimensions
     self.rnn_size = rnn_size
     self.embed_dim = rnn_size
-    self.depth = DEPTH 
+    self.depth = 5 
     self.in_len = 1
     self.out_len = 1
     self.num_classes = 12
@@ -163,7 +163,6 @@ class Trainer():
   def train_step(self,Xtrain,Ytrain,cell_state):
     """ updates model parameters using Xtrain,Ytrain
     """
-    
     # initialize iterator with train data
     train_feed_dict = {
       self.net.xph: Xtrain,
@@ -404,8 +403,10 @@ class CSWTask():
     Y = path[1:-1]
     X = np.vstack([X]).transpose()
     Y = np.vstack([Y]).transpose()
-    X = self.slice_and_stride(X,depth)
-    Y = self.slice_and_stride(Y,depth)
+    X = np.expand_dims(X,0)
+    Y = np.expand_dims(Y,0)
+    # X = self.slice_and_stride(X,depth)
+    # Y = self.slice_and_stride(Y,depth)
     return X,Y
 
   def dataset_kstories_pomdp(self,pathL,graphidL):
