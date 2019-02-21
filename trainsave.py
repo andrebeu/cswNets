@@ -25,7 +25,7 @@ train_data = trainer.train_loop(nepochs)
 # eval trained model
 eval_seqL = ['AAA','AAB','ABA','ABB',
 						 'BBB','BBA','BAB','BAA']
-eval_data = trainer.eval_loop1(eval_seqL)
+eval_data = trainer.eval_loop(eval_seqL)
 
 
 ## save

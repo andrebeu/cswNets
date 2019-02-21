@@ -220,7 +220,7 @@ class Trainer():
         break 
     return eval_data_arr
 
-  def eval_loop1(self,context_strL):
+  def eval_loop(self,context_strL):
     """ 
     evaluates on sequences generated from context_strL
     """
@@ -232,7 +232,7 @@ class Trainer():
                         ]) for context_str in context_strL]
     eval_arr = np.zeros([],dtype=eval_arr_dtype)
     for context_str in context_strL:
-      Xeval,Yeval = self.task.get_Xeval1(context_str)
+      Xeval,Yeval = self.task.get_Xeval(context_str)
       evalstep_data = self.eval_step(Xeval,Yeval,cell_state='rand')
       eval_arr[context_str] = evalstep_data
     return eval_arr
@@ -241,7 +241,7 @@ class Trainer():
     """ 
     """
     nevals = nepochs
-    Xeval,Yeval = self.task.get_Xeval1('ABA')
+    Xeval,Yeval = self.task.get_Xeval('ABA')
     print('training eval is on ABA')
     ## setup eval data array
     eval_array_dtype = [('xbatch','int32',(TRAIN_BATCH_SIZE,self.net.depth)),
@@ -351,24 +351,15 @@ class CSWMLTask():
     Y = np.roll(X,-1)
     return X,Y
 
-  def get_Xeval1(self,context_str):
+  def get_Xeval(self,context_str):
     """ given a context_str (e.g. 'ABA') generates an eval dataset 
     """
-    D = {'A':[[0, 2, 4, 6, 8, 9],10],
-         'B':[[0, 2, 3, 6, 7, 9],11]}
-    pathL = [D[context][0] for context in context_str]
-    graphidL = [D[context][1] for context in context_str]
+    D = {'A1':[[0, 1, 3, 5, 7, 9],10],
+    		 'A2':[[0, 2, 4, 6, 8, 9],10],
+         'B1':[[0, 1, 4, 5, 8, 9],11],
+         'B2':[[0, 2, 3, 6, 7, 9],11]
+         }
+    pathL = [D[context_str[2*cidx:2*cidx+2]][0] for cidx in np.arange(3)]
+    graphidL = [D[context_str[2*cidx:2*cidx+2]][1] for cidx in np.arange(3)]
     Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
     return Xeval,Yeval
-
-  def get_Xeval(self):
-    """
-    assumes nstories = 3 
-    first path is no graph shift 10 10 10
-    second path is graph shift in middle 10 11 10
-    """
-    pathL_eval1 = [[0, 2, 4, 6, 8, 9],[0, 2, 4, 6, 8, 9],[0, 2, 4, 6, 8, 9]] # [10,10,10]
-    pathL_eval2 = [[0, 2, 4, 6, 8, 9],[0, 2, 3, 6, 7, 9],[0, 2, 4, 6, 8, 9]] # [10,11,10]
-    Xeval1,Yeval = self.dataset_kstories(pathL_eval1,[10,10,10])
-    Xeval2,Yeval = self.dataset_kstories(pathL_eval2,[10,11,10])
-    return np.concatenate([Xeval1,Xeval2])
