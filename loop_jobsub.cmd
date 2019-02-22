@@ -11,10 +11,11 @@ declare -a cswpr_arr=(90 80 70 60)
 
 
 ## now loop through the above array
-for i in {1..50}; do 
+for i in {1..2}; do 
 	for stsize in "${stsize_arr[@]}"; do 
 		for prshift in "${shift_arr[@]}"; do 
 			for cswpr in "${cswpr_arr[@]}"; do 
+				printf "st ${stsize} csw ${cswpr} shift ${prshift}"
 				sbatch ${wd_dir}/gpu_jobsub.cmd "${stsize}" "${cswpr}" "${prshift}" 
 			done
 		done
