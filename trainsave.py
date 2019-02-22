@@ -10,10 +10,9 @@ import tensorflow as tf
 
 # model params
 stsize = int(sys.argv[1])
-print('stsize',stsize)
 nstories = 3
 # task/training params
-nepochs = 1000
+nepochs = 30000
 graphpr = int(sys.argv[2])
 shiftpr = int(sys.argv[3])
 
