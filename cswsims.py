@@ -241,7 +241,7 @@ class Trainer():
     """ 
     """
     nevals = nepochs
-    Xeval,Yeval = self.task.get_Xeval('ABA')
+    Xeval,Yeval = self.task.get_Xeval('A1B1A1')
     print('training eval is on ABA')
     ## setup eval data array
     eval_array_dtype = [('xbatch','int32',(TRAIN_BATCH_SIZE,self.net.depth)),

@@ -7,7 +7,7 @@ from cswsims import *
 import tensorflow as tf
 
 # model params
-stsize = 50 
+stsize = 20 
 nstories = 3
 # task/training params
 graphpr = 0.9
@@ -20,11 +20,12 @@ context_strL=["".join(i) for i in itertools.product(
                                    )]
 
 
-for idx in range(150):
-  for shiftpr in [10,50,90]:
+
+for shiftpr in [10,50,90]:
+  for idx in range(25):
     print('shift',shiftpr,'idx',idx)
     midx = "%.3i"%idx
-    model_dir = 'models/sweep_shiftpr/state_50-nstories_3-shiftpr_%i/%s' %(shiftpr,midx)
+    model_dir = 'models/sweep_shiftpr/state_%i-nstories_3-shiftpr_%i/%s' %(stsize,shiftpr,midx)
     ## restore
     ML = MetaLearner(stsize,nstories)
     ML.saver_op.restore(ML.sess,model_dir+'/trained')
