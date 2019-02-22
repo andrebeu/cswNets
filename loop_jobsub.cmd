@@ -5,11 +5,18 @@ printf "\n\n -- cluster_loop\n"
 stamp=$(date +"%m%d%H%M%S")
 wd_dir="/tigress/abeukers/wd/cswNets"
 
-declare -a arr=(10 25 50 75 90)
+declare -a stsize_arr=(5 10 20 50)
+declare -a shift_arr=(10 50 90)
+declare -a cswpr_arr=(90 80 70 60)
+
 
 ## now loop through the above array
-for i in {1..25}; do 
-	for PRSHIFT in "${arr[@]}"; do 
-		sbatch ${wd_dir}/gpu_jobsub.cmd "${PRSHIFT}" 
+for i in {1..50}; do 
+	for stsize in "${stsize_arr[@]}"; do 
+		for prshift in "${shift_arr[@]}"; do 
+			for cswpr in "${cswpr_arr[@]}"; do 
+				sbatch ${wd_dir}/gpu_jobsub.cmd "${stsize}" "${cswpr}" "${prshift}" 
+			done
+		done
 	done
 done

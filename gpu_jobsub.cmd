@@ -11,7 +11,9 @@
 
 printf "\n\n\n --ntasks-per-node=1 -c=8 ntasks-per-socket=4 \n\n\n"
 
-PRSHIFT=${1}
+stsize=${1}
+cswpr=${2}
+prshift=${3}
 
 module load anaconda3/4.4.0
 module load cudnn/cuda-9.1/7.1.2
@@ -22,7 +24,7 @@ printf "\n\n NBack Task \n\n"
 
 
 
-srun python -u "/tigress/abeukers/wd/cswNets/trainsave.py" ${PRSHIFT} 
+srun python -u "/tigress/abeukers/wd/cswNets/trainsave.py" ${stsize} ${cswpr} ${prshift} 
 
 
 printf "\n\nGPU profiling \n\n"

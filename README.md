@@ -4,6 +4,9 @@ Begin: Feb 22, 2019
 
 Starting this new branch to investigate factors that push and pull the network to learn tensor-product versus generalized representations for csw graphs. once I understand how to encourage the network to develop generalized representations I will go back to the problem of learning forget gate dynamics. 
 
+## changes
+- no longer unrolling an outstep. i.e. output is computed from the same cell state computed after consuming an input instead of unrolling a further step
+- will try to squeeze unitary batch dimension before saving so that I don't have to squeeze on the jupyter notebook.
 
 # cswNets: meta learning
 

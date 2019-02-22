@@ -206,10 +206,10 @@ class Trainer():
       try:
         xbatch,yhat,states,fgate = self.net.sess.run(
           [self.net.xbatch_id,self.net.yhat_sm,self.net.states,self.net.fgate],feed_dict=pred_feed_dict)
-        eval_data_arr['xbatch'] = xbatch
-        eval_data_arr['yhat'] = yhat
-        eval_data_arr['states'] = states
-        eval_data_arr['fgate'] = fgate
+        eval_data_arr['xbatch'] = xbatch.squeeze()
+        eval_data_arr['yhat'] = yhat.squeeze()
+        eval_data_arr['states'] = states.squeeze()
+        eval_data_arr['fgate'] = fgate.squeeze()
       except tf.errors.OutOfRangeError:
         break 
     return eval_data_arr
@@ -219,10 +219,10 @@ class Trainer():
     evaluates on sequences generated from context_strL
     """
     eval_arr_dtype = [(context_str, [
-                        ('xbatch','int32',(1,self.net.depth)),
-                        ('yhat','float32',(1,self.net.depth,self.net.num_classes)),
-                        ('states','float32',(1,self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(1,self.net.depth,self.net.stsize))
+                        ('xbatch','int32',(self.net.depth)),
+                        ('yhat','float32',(self.net.depth,self.net.num_classes)),
+                        ('states','float32',(self.net.depth,self.net.stsize)),
+                        ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]) for context_str in context_strL]
     eval_arr = np.zeros([],dtype=eval_arr_dtype)
     for context_str in context_strL:

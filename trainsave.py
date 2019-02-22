@@ -9,12 +9,12 @@ import tensorflow as tf
 
 
 # model params
-stsize = 50 
+stsize = sys.argv[1]
 nstories = 3
 # task/training params
 nepochs = 1000
-graphpr = 90
-shiftpr = 50
+graphpr = sys.argv[2]
+shiftpr = sys.argv[3]
 
 
 ML = MetaLearner(stsize,nstories)
