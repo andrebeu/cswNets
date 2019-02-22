@@ -125,17 +125,11 @@ class MetaLearner():
       initstate = state = tf.nn.rnn_cell.LSTMStateTuple(self.cellstate_ph,self.cellstate_ph)
       # unroll
       outputL,stateL,fgateL = [],[],[]
-      zero_input = tf.zeros_like(xbatch[:,0,:])
       for tstep in range(self.depth):
-        # input
-        __,state = cell(xbatch[:,tstep,:], state)
+        output,state = cell(xbatch[:,tstep,:], state)
         stateL.append(state[0])
         fgateL.append(cell.forget_act)
         cellscope.reuse_variables()
-        # output: inputs are zeroed out
-        output,state = cell(zero_input, state) 
-        stateL.append(state[0])
-        fgateL.append(cell.forget_act)
         outputL.append(output)
     # format for y_hat
     outputs = tf.stack(outputL,axis=1)
@@ -193,8 +187,8 @@ class Trainer():
     # initialize data datastructure for collecting data
     eval_array_dtype = [('xbatch','int32',(batch_size,self.net.depth)),
                         ('yhat','float32',(batch_size,self.net.depth,self.net.num_classes)),
-                        ('states','float32',(batch_size,self.net.depth*2,self.net.stsize)),
-                        ('fgate','float32',(batch_size,self.net.depth*2,self.net.stsize))
+                        ('states','float32',(batch_size,self.net.depth,self.net.stsize)),
+                        ('fgate','float32',(batch_size,self.net.depth,self.net.stsize))
                         ]
     eval_data_arr = np.zeros((),dtype=eval_array_dtype)
     # feed dict
@@ -227,8 +221,8 @@ class Trainer():
     eval_arr_dtype = [(context_str, [
                         ('xbatch','int32',(1,self.net.depth)),
                         ('yhat','float32',(1,self.net.depth,self.net.num_classes)),
-                        ('states','float32',(1,self.net.depth*2,self.net.stsize)),
-                        ('fgate','float32',(1,self.net.depth*2,self.net.stsize))
+                        ('states','float32',(1,self.net.depth,self.net.stsize)),
+                        ('fgate','float32',(1,self.net.depth,self.net.stsize))
                         ]) for context_str in context_strL]
     eval_arr = np.zeros([],dtype=eval_arr_dtype)
     for context_str in context_strL:

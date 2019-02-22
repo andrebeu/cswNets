@@ -1,37 +1,41 @@
 import sys,os
-import numpy as np
 from glob import glob as glob
+
+import numpy as np
+import itertools
 
 from cswsims import *
 import tensorflow as tf
 
 
-shiftpr = int(sys.argv[1])/100
-
 # model params
 stsize = 50 
 nstories = 3
 # task/training params
-nepochs = 10000
-graphpr = 0.9
+nepochs = 1000
+graphpr = 90
+shiftpr = 50
 
 
 ML = MetaLearner(stsize,nstories)
 
 # train
-trainer = Trainer(ML,shift_pr=shiftpr,graph_pr=graphpr)
+trainer = Trainer(ML,shift_pr=shiftpr/100,graph_pr=graphpr/100)
 train_data = trainer.train_loop(nepochs)
 
 # eval trained model
-eval_seqL = ['AAA','AAB','ABA','ABB',
-						 'BBB','BBA','BAB','BAA']
-eval_data = trainer.eval_loop(eval_seqL)
+eval_context_strL=["".join(i) for i in itertools.product(
+                                    ('A1','A2','B1','B2'),
+                                    ('A1','A2','B1','B2'),
+                                    ('A1','A2','B1','B2')
+                                   )]
 
+eval_data = trainer.eval_loop(eval_context_strL)
 
 ## save
-model_name = 'state_%i-nstories_%i-shiftpr_%i'%(stsize,nstories,shiftpr*100)
-num_models = len(glob('models/sweep_shiftpr/%s/*'%model_name)) 
-model_dir = 'models/sweep_shiftpr/%s/%.3i'%(model_name,num_models) 
+model_name = 'state_%i-csw_%i-nstories_%i-shiftpr_%i'%(stsize,nstories,shiftpr,graphpr)
+num_models = len(glob('models/csw_tpgen/%s/*'%model_name)) 
+model_dir = 'models/csw_tpgen/%s/%.3i'%(model_name,num_models) 
 os.makedirs(model_dir)
 
 # model
