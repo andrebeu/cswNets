@@ -15,7 +15,7 @@ change train & save file to save (1) model (2) train data (3) eval data at end o
 
 class MetaLearner():
 
-  def __init__(self,stsize,nstories,random_seed=1):
+  def __init__(self,stsize,random_seed=1):
     """
     """
     self.graph = tf.Graph()
@@ -24,8 +24,8 @@ class MetaLearner():
     # dimensions
     self.stsize = stsize
     self.embed_dim = stsize
-    self.nstories = nstories
-    self.depth = 7*nstories 
+    self.nstories = 6
+    self.depth = 7*6 
     self.num_classes = 12
     # build
     self.build()
@@ -42,15 +42,20 @@ class MetaLearner():
       self.embed_mat = tf.get_variable('embedding_matrix',[self.num_classes,self.embed_dim])
       self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,stsize
       ## inference
-      self.unscaled_logits,self.final_cell_state_op,self.states = self.RNN() # batch,bptt,nclasses
-      ## loss
-      self.ybatch_onehot = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
+      self.unscaled_logits_full,self.final_cell_state_op,self.states = self.RNN() # batch,bptt,nclasses
+      ## eval loss
+      self.ybatch_onehot_full = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
+      self.eval_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
+                          labels=self.ybatch_onehot_full,logits=self.unscaled_logits_full)
+      ## train_loss
+      self.unscaled_logits_bptt = self.unscaled_logits_full[:,-3*7:,:]
+      self.ybatch_onehot_bptt = self.ybatch_onehot_full[:,-3*7:,:]
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-                          labels=self.ybatch_onehot,logits=self.unscaled_logits)
+                          labels=self.ybatch_onehot_bptt,logits=self.unscaled_logits_bptt)
       print("ADAM01")
       self.minimizer_op = tf.train.AdamOptimizer(0.01).minimize(self.train_loss)
       ## accuracy
-      self.yhat_sm = tf.nn.softmax(self.unscaled_logits)
+      self.yhat_sm = tf.nn.softmax(self.unscaled_logits_full)
       self.yhat_id = tf.argmax(self.yhat_sm,-1)
       ## extra
       self.sess.run(tf.global_variables_initializer())
@@ -179,23 +184,22 @@ class Trainer():
     ideally i could make predictions on each context independently 
     so that could make predictions with the appropriate embedding
     """
-    batch_size = len(Xeval)
     if cell_state == 'rand':
       cell_state = np.random.random([1,self.net.stsize])
     # repeat cell state for each prediction
-    cell_state = np.repeat(cell_state,batch_size,axis=0)
+    # cell_state = np.repeat(cell_state,axis=0)
     # initialize data datastructure for collecting data
-    eval_array_dtype = [('xbatch','int32',(batch_size,self.net.depth)),
-                        ('yhat','float32',(batch_size,self.net.depth,self.net.num_classes)),
-                        ('states','float32',(batch_size,self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(batch_size,self.net.depth,self.net.stsize))
+    eval_array_dtype = [('xbatch','int32',(self.net.depth)),
+                        ('yhat','float32',(self.net.depth,self.net.num_classes)),
+                        ('states','float32',(self.net.depth,self.net.stsize)),
+                        ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
     eval_data_arr = np.zeros((),dtype=eval_array_dtype)
     # feed dict
     pred_feed_dict = {
       self.net.xph:Xeval,
       self.net.yph:Yeval,
-      self.net.batch_size_ph: batch_size,
+      self.net.batch_size_ph: 1,
       self.net.dropout_keep_prob: 1.0,
       self.net.cellstate_ph: cell_state
     }
@@ -235,17 +239,17 @@ class Trainer():
     """ 
     """
     nevals = nepochs
-    Xeval,Yeval = self.task.get_Xeval('A1B1A1')
-    print('training eval is on ABA')
+    Xeval,Yeval = self.task.get_Xeval('A1B1A1A1B1B1')
+    print('training eval is on ABAABB')
     ## setup eval data array
-    eval_array_dtype = [('xbatch','int32',(TRAIN_BATCH_SIZE,self.net.depth)),
-                        ('yhat','float32',(TRAIN_BATCH_SIZE,self.net.depth,self.net.num_classes)),
-                        ('states','float32',(TRAIN_BATCH_SIZE,self.net.depth*2,self.net.stsize)),
-                        ('fgate','float32',(TRAIN_BATCH_SIZE,self.net.depth*2,self.net.stsize))
+    eval_array_dtype = [('xbatch','int32',(self.net.depth)),
+                        ('yhat','float32',(self.net.depth,self.net.num_classes)),
+                        ('states','float32',(self.net.depth,self.net.stsize)),
+                        ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
     train_data = np.zeros((nevals), dtype=eval_array_dtype)
     ## init cell state
-    rand_cell_state = cell_state = np.random.random([TRAIN_BATCH_SIZE,self.net.stsize])
+    rand_cell_state = cell_state = np.random.random([1,self.net.stsize])
     # train loop
     for ep in range(nepochs):
       # generate data
@@ -353,7 +357,7 @@ class CSWMLTask():
          'B1':[[0, 1, 4, 5, 8, 9],11],
          'B2':[[0, 2, 3, 6, 7, 9],11]
          }
-    pathL = [D[context_str[2*cidx:2*cidx+2]][0] for cidx in np.arange(3)]
-    graphidL = [D[context_str[2*cidx:2*cidx+2]][1] for cidx in np.arange(3)]
+    pathL = [D[context_str[2*cidx:2*cidx+2]][0] for cidx in np.arange(int(len(context_str)/2))]
+    graphidL = [D[context_str[2*cidx:2*cidx+2]][1] for cidx in np.arange(int(len(context_str)/2))]
     Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
     return Xeval,Yeval
