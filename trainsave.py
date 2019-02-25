@@ -9,14 +9,14 @@ import tensorflow as tf
 
 
 # model params
-stsize = int(sys.argv[1])
+arch = str(sys.argv[1])
+stsize = int(sys.argv[2])
 # task/training params
+graphpr = int(sys.argv[3])
+shiftpr = int(sys.argv[4])
 nepochs = 40000
-graphpr = int(sys.argv[2])
-shiftpr = int(sys.argv[3])
 
-
-ML = MetaLearner(stsize)
+ML = MetaLearner(stsize,feedPE=arch)
 
 # train
 trainer = Trainer(ML,shift_pr=shiftpr/100,graph_pr=graphpr/100)
@@ -35,9 +35,9 @@ eval_context_strL=["".join(i) for i in itertools.product(
 eval_data = trainer.eval_loop(eval_context_strL)
 
 ## save
-model_name = 'state_%i-csw_%i-shiftpr_%i-nstories_fp6bp3'%(stsize,graphpr,shiftpr)
-num_models = len(glob('models/csw_tpgen/%s/*'%model_name)) 
-model_dir = 'models/csw_tpgen/%s/%.3i'%(model_name,num_models) 
+model_name = 'LSTM_%s-state_%i-csw_%i-shiftpr_%i-nstories_fp6bp3'%(arch,stsize,graphpr,shiftpr)
+num_models = len(glob('models/csw_pef/%s/*'%model_name)) 
+model_dir = 'models/csw_pef/%s/%.3i'%(model_name,num_models) 
 os.makedirs(model_dir)
 
 # model

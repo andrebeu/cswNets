@@ -11,24 +11,19 @@
 
 printf "\n\n\n --ntasks-per-node=1 -c=8 ntasks-per-socket=4 \n\n\n"
 
-stsize=${1}
-cswpr=${2}
-prshift=${3}
+arch=${1}
+stsize=${2}
+cswpr=${3}
+prshift=${4}
 
 module load anaconda3/4.4.0
 module load cudnn/cuda-9.1/7.1.2
 module load openmpi/gcc/2.1.0/64 # srm
 
-
 printf "\n\n NBack Task \n\n"
 
-
-
-srun python -u "/tigress/abeukers/wd/cswNets/trainsave.py" ${stsize} ${cswpr} ${prshift} 
-
+srun python -u "/tigress/abeukers/wd/cswNets/trainsave.py" ${arch} ${stsize} ${cswpr} ${prshift} 
 
 printf "\n\nGPU profiling \n\n"
 sacct --format="elapsed,CPUTime,TotalCPU"
 nvidia-smi --query-accounted-apps=gpu_serial,gpu_utilization,mem_utilization,max_memory_usage --format=csv
-
-# mv slurm*.out slurm_out/

@@ -15,7 +15,7 @@ change train & save file to save (1) model (2) train data (3) eval data at end o
 
 class MetaLearner():
 
-  def __init__(self,stsize,feedPE=False,random_seed=1):
+  def __init__(self,stsize,feedPE,random_seed=1):
     """
     """
     self.graph = tf.Graph()
@@ -120,27 +120,29 @@ class MetaLearner():
     returns unscaled logits
     """
     ## CELLL
-    if (not self.feedPE) or (self.feedPE=='input'):
+    if (self.feedPE=='baseline') or (self.feedPE=='input'):
       cell = self.cell = LSTMBaseline(
             self.stsize,dropout_keep_prob=self.dropout_keep_prob)
-    elif self.feedPE == 'fgate':
+    elif (self.feedPE == 'fgate'):
       cell = self.cell = LSTMFgatePE(
             self.stsize,dropout_keep_prob=self.dropout_keep_prob)
     # unroll RNN
     with tf.variable_scope('RNN_SCOPE') as cellscope:
       # initialize state
-      initial_PE = PE_t = tf.zeros_like(self.ybatch_onehot_full[:,0,:],tf.float32)
+      initialPE = PE_t = tf.zeros_like(self.ybatch_onehot_full[:,0,:],tf.float32)
       initstate = state = tf.nn.rnn_cell.LSTMStateTuple(self.cellstate_ph,self.cellstate_ph)
       # unroll
       outputL,stateL,fgateL,PEL = [],[],[],[]
       for tstep in range(self.depth):
         # input projection
-        if (not self.feedPE):
-          input_t = tf.layers.dense(self.xbatch[:,tstep,:],
-            self.stsize,tf.nn.relu,name='inproj')
-        elif (self.feedPE == 'input') or (self.feedPE=='fgate'):
-          input_t = tf.layers.dense(tf.concat([self.xbatch[:,tstep,:],PE_t],1),
-            self.stsize,tf.nn.relu,name='inproj')
+        if (self.feedPE=='baseline'):
+          input_t = tf.layers.dense(
+                      self.xbatch[:,tstep,:],
+                      self.stsize,tf.nn.relu,name='inproj')
+        elif (self.feedPE=='input') or (self.feedPE=='fgate'):
+          input_t = tf.layers.dense(
+                      tf.concat([self.xbatch[:,tstep,:],PE_t],1),
+                      self.stsize,tf.nn.relu,name='inproj')
         # cell update
         output,state = cell(input_t, state)
         # outproj 
