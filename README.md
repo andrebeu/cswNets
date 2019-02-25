@@ -1,3 +1,13 @@
+# CSW Prediction Error Flushing. Feb 24, 2019
+
+Event cognition theories relies on the assumption that prediction errors drive a flushing of currently maintained context representation. Here we model that assumption
+
+The strategy will be to use an LSTM with only a flushing gate (no in/out gates) on a fully latent csw task (no marker). We will compare 3 architectures:
+- LSTM baseline
+- LSTM with PE given as second input
+- LSTM with PE controlling only flush gate
+
+
 # csw_tp_or_general: tensor-product or generalized representations?
 
 Begin: Feb 22, 2019

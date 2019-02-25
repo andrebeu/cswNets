@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from customtf import LayerNormBasicLSTMCell as CustomLSTM
+from customtf import LSTMBaseline,LSTMFgatePE
 
 
 TRAIN_BATCH_SIZE = 1
@@ -11,11 +11,11 @@ change train & save file to save (1) model (2) train data (3) eval data at end o
 
 """
 
-## NB depth should be 7*nstories
+## NB depth should be 6*nstories
 
 class MetaLearner():
 
-  def __init__(self,stsize,random_seed=1):
+  def __init__(self,stsize,feedPE=False,random_seed=1):
     """
     """
     self.graph = tf.Graph()
@@ -25,8 +25,9 @@ class MetaLearner():
     self.stsize = stsize
     self.embed_dim = stsize
     self.nstories = 6
-    self.depth = 7*6 
+    self.depth = 6*6 
     self.num_classes = 12
+    self.feedPE = feedPE
     # build
     self.build()
 
@@ -41,15 +42,15 @@ class MetaLearner():
       ## embedding 
       self.embed_mat = tf.get_variable('embedding_matrix',[self.num_classes,self.embed_dim])
       self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,stsize
+      self.ybatch_onehot_full = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
       ## inference
       self.unscaled_logits_full,self.final_cell_state_op,self.states = self.RNN() # batch,bptt,nclasses
       ## eval loss
-      self.ybatch_onehot_full = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
       self.eval_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                           labels=self.ybatch_onehot_full,logits=self.unscaled_logits_full)
       ## train_loss
-      self.unscaled_logits_bptt = self.unscaled_logits_full[:,-3*7:,:]
-      self.ybatch_onehot_bptt = self.ybatch_onehot_full[:,-3*7:,:]
+      self.unscaled_logits_bptt = self.unscaled_logits_full[:,-3*6:,:]
+      self.ybatch_onehot_bptt = self.ybatch_onehot_full[:,-3*6:,:]
       self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
                           labels=self.ybatch_onehot_bptt,logits=self.unscaled_logits_bptt)
       print("ADAM01")
@@ -112,36 +113,51 @@ class MetaLearner():
       - depth: number of (input_seq,output_seq) that are unrolled
       - in_len: length of each input sequence
       - out_len: length of each output sequence
-    consumes a sentence at a time
       
     RNN structure:
       takes in state and a filler
       returns prediction for next state and a filler
     returns unscaled logits
     """
-    xbatch = self.xbatch
-    cell = self.cell = CustomLSTM(
+    ## CELLL
+    if (not self.feedPE) or (self.feedPE=='input'):
+      cell = self.cell = LSTMBaseline(
             self.stsize,dropout_keep_prob=self.dropout_keep_prob)
-    xbatch = tf.layers.dense(xbatch,self.stsize,tf.nn.relu,name='inproj')
+    elif self.feedPE == 'fgate':
+      cell = self.cell = LSTMFgatePE(
+            self.stsize,dropout_keep_prob=self.dropout_keep_prob)
     # unroll RNN
     with tf.variable_scope('RNN_SCOPE') as cellscope:
       # initialize state
-      # initial_state = state = cell.zero_state(tf.cast(self.batch_size_ph,tf.int32),tf.float32)
+      initial_PE = PE_t = tf.zeros_like(self.ybatch_onehot_full[:,0,:],tf.float32)
       initstate = state = tf.nn.rnn_cell.LSTMStateTuple(self.cellstate_ph,self.cellstate_ph)
       # unroll
-      outputL,stateL,fgateL = [],[],[]
+      outputL,stateL,fgateL,PEL = [],[],[],[]
       for tstep in range(self.depth):
-        output,state = cell(xbatch[:,tstep,:], state)
+        # input projection
+        if (not self.feedPE):
+          input_t = tf.layers.dense(self.xbatch[:,tstep,:],
+            self.stsize,tf.nn.relu,name='inproj')
+        elif (self.feedPE == 'input') or (self.feedPE=='fgate'):
+          input_t = tf.layers.dense(tf.concat([self.xbatch[:,tstep,:],PE_t],1),
+            self.stsize,tf.nn.relu,name='inproj')
+        # cell update
+        output,state = cell(input_t, state)
+        # outproj 
+        out_proj = tf.layers.dense(output,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
+        # update PE
+        PE_t = tf.math.squared_difference(tf.nn.softmax(out_proj),self.ybatch_onehot_full[:,tstep,:])
+        # collect
+        PEL.append(PE_t)
         stateL.append(state[0])
         fgateL.append(cell.forget_act)
+        outputL.append(out_proj)
         cellscope.reuse_variables()
-        outputL.append(output)
-    # format for y_hat
+    # formatting
     outputs = tf.stack(outputL,axis=1)
     states = tf.stack(stateL,axis=1)
     self.fgate = tf.stack(fgateL,axis=1)
-    # project to unscaled logits (to that outdim = num_classes)
-    outputs = tf.layers.dense(outputs,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
+    self.PE = tf.stack(PEL,axis=1)
     return outputs,state,states
 
 """ 
@@ -192,7 +208,8 @@ class Trainer():
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('yhat','float32',(self.net.depth,self.net.num_classes)),
                         ('states','float32',(self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(self.net.depth,self.net.stsize))
+                        ('fgate','float32',(self.net.depth,self.net.stsize)),
+                        ('PE','float32',(self.net.depth,self.net.num_classes))
                         ]
     eval_data_arr = np.zeros((),dtype=eval_array_dtype)
     # feed dict
@@ -208,12 +225,13 @@ class Trainer():
     # eval loop
     while True:
       try:
-        xbatch,yhat,states,fgate = self.net.sess.run(
-          [self.net.xbatch_id,self.net.yhat_sm,self.net.states,self.net.fgate],feed_dict=pred_feed_dict)
+        xbatch,yhat,states,fgate,PE = self.net.sess.run(
+          [self.net.xbatch_id,self.net.yhat_sm,self.net.states,self.net.fgate,self.net.PE],feed_dict=pred_feed_dict)
         eval_data_arr['xbatch'] = xbatch.squeeze()
         eval_data_arr['yhat'] = yhat.squeeze()
         eval_data_arr['states'] = states.squeeze()
         eval_data_arr['fgate'] = fgate.squeeze()
+        eval_data_arr['PE'] = PE.squeeze()
       except tf.errors.OutOfRangeError:
         break 
     return eval_data_arr
@@ -245,7 +263,8 @@ class Trainer():
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('yhat','float32',(self.net.depth,self.net.num_classes)),
                         ('states','float32',(self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(self.net.depth,self.net.stsize))
+                        ('fgate','float32',(self.net.depth,self.net.stsize)),
+                        ('PE','float32',(self.net.depth,self.net.num_classes))
                         ]
     train_data = np.zeros((nevals), dtype=eval_array_dtype)
     ## init cell state
@@ -253,8 +272,8 @@ class Trainer():
     # train loop
     for ep in range(nepochs):
       # generate data
-      pathL,graphidL = self.task.gen_pathL(self.net.nstories,self.shift_pr)
-      Xtrain,Ytrain = self.task.dataset_kstories(pathL,graphidL)
+      pathL = self.task.gen_pathL(self.net.nstories,self.shift_pr)
+      Xtrain,Ytrain = self.task.dataset_kstories(pathL)
       # eval network on data
       trainstep_data = self.eval_step(Xeval,Yeval,cell_state)
       train_data[ep] = trainstep_data
@@ -321,29 +340,25 @@ class CSWMLTask():
     generates k paths fully interleaving graphA and graphB
     returns a list, each item being a path
     """
-    graphids = [10,11]
     pathL = []
-    graphidL = []
     for i in range(k):
       # w/pr pr_shift, change contexts
       if np.random.binomial(1,pr_shift):
         self.graph_idx = (self.graph_idx+1)%2
       graph = self.graphs[self.graph_idx]
       path = self.gen_single_path(graph)
-      graphidL.append(graphids[self.graph_idx])
       pathL.append(path)
-    return pathL,graphidL
+    return pathL
 
-  def dataset_kstories(self,pathL,graphidL):
+  def dataset_kstories(self,pathL):
     """
-    given a pathL `list of arr` and graphidL `list of int`
+    given a pathL `list of arr` 
     returns:
-      X = [[[begin,id,st(t),st(t+1)],],]
-      Y = [[[id,st(t+1),f1(t+1)],],]
+      X = [[[begin,st(t),st(t+1)],],]
       shape: (samples,depth)
     """
     num_paths = len(pathL)
-    kpaths = np.concatenate([np.insert(pathL[i],0,graphidL[i]) for i in range(num_paths)])
+    kpaths = np.concatenate([pathL[i] for i in range(num_paths)])
     kpaths = np.expand_dims(kpaths,0)
     X = kpaths
     Y = np.roll(X,-1)
@@ -352,12 +367,11 @@ class CSWMLTask():
   def get_Xeval(self,context_str):
     """ given a context_str (e.g. 'ABA') generates an eval dataset 
     """
-    D = {'A1':[[0, 1, 3, 5, 7, 9],10],
-    		 'A2':[[0, 2, 4, 6, 8, 9],10],
-         'B1':[[0, 1, 4, 5, 8, 9],11],
-         'B2':[[0, 2, 3, 6, 7, 9],11]
+    D = {'A1':[0, 1, 3, 5, 7, 9],
+    		 'A2':[0, 2, 4, 6, 8, 9],
+         'B1':[0, 1, 4, 5, 8, 9],
+         'B2':[0, 2, 3, 6, 7, 9]
          }
-    pathL = [D[context_str[2*cidx:2*cidx+2]][0] for cidx in np.arange(int(len(context_str)/2))]
-    graphidL = [D[context_str[2*cidx:2*cidx+2]][1] for cidx in np.arange(int(len(context_str)/2))]
-    Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
+    pathL = [D[context_str[2*cidx:2*cidx+2]] for cidx in np.arange(int(len(context_str)/2))]
+    Xeval,Yeval = self.dataset_kstories(list(pathL))
     return Xeval,Yeval
