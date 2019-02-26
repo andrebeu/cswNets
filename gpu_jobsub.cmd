@@ -20,7 +20,7 @@ module load cudnn/cuda-9.1/7.1.2
 module load openmpi/gcc/2.1.0/64 # srm
 
 
-printf "\n\n NBack Task \n\n"
+printf "\n\n CSWNets \n\n"
 
 
 
