@@ -52,10 +52,10 @@ class CSWNet():
                                   logits=self.ylogits_context)
       self.train_loss = tf.concat([self.train_loss_node,self.train_loss_context],axis=1)
       ## optimizer
-      self.minimize_node = tf.train.AdamOptimizer(0.001).minimize(self.train_loss_node)
+      self.minimize_node = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_node)
       self.minimize_context = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_context)
-      # self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
-      self.minimizer_op = self.minimize_context
+      self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
+      # self.minimizer_op = self.minimize_context
       ## softmax normalization and argmax
       self.ynode_sm = tf.nn.softmax(self.ylogits_node) 
       self.ynode_id = tf.argmax(self.ynode_sm,-1)
@@ -123,8 +123,10 @@ class CSWNet():
       state = tf.nn.rnn_cell.LSTMStateTuple(self.cell_state,self.cell_state)
       # unroll
       outL_node,outL_context,stateL,fgateL = [],[],[],[]
+      outL = []
       for tstep in range(self.depth):
         output,state = cell(xbatch[:,tstep,:], state)
+        outL.append(output)
         if tstep%self.story_depth==0:
           outL_context.append(output)
         else:
