@@ -2,18 +2,11 @@ import numpy as np
 import tensorflow as tf
 from customtf import LayerNormBasicLSTMCell as CustomLSTM
 
-
-TRAIN_BATCH_SIZE = 1
-
 """
-also save cell state trajectory during eval
-change train & save file to save (1) model (2) train data (3) eval data at end of training
-
 """
 
-## NB depth should be 7*nstories
 
-class MetaLearner():
+class CSWNet():
 
   def __init__(self,stsize,random_seed=1):
     """
@@ -25,8 +18,13 @@ class MetaLearner():
     self.stsize = stsize
     self.embed_dim = stsize
     self.nstories = 6
-    self.depth = 7*6 
+    self.depth = 6*self.nstories 
     self.num_classes = 12
+    self.num_nodes = 10
+    self.num_contexts = 2
+    # indexes for context and node time steps
+    self.tstep_idx_context = np.arange(0,self.depth,7)
+    self.tstep_idx_node = np.delete(np.arange(self.depth),self.tstep_idx_context)
     # build
     self.build()
 
@@ -37,47 +35,47 @@ class MetaLearner():
       # place holders
       self.setup_placeholders()
       # pipeline
-      self.xbatch_id,self.ybatch_id = self.data_pipeline() # x(batches,bptt), y(batch,bptt)
+      self.xbatch_id,self.ybatch_node_id,self.ybatch_context_id = self.data_pipeline() # x(batches,bptt), y(batch,bptt)
       ## embedding 
-      self.embed_mat = tf.get_variable('embedding_matrix',[self.num_classes,self.embed_dim])
-      self.xbatch = tf.nn.embedding_lookup(self.embed_mat,self.xbatch_id,name='xembed') # batch,bptt,stsize
+      self.node_emat = tf.get_variable('node_emat',[self.num_nodes,self.embed_dim])
+      self.xbatch = tf.nn.embedding_lookup(self.node_emat,self.xbatch_id,name='xembed') # batch,bptt,stsize
       ## inference
-      self.unscaled_logits_full,self.final_cell_state_op,self.states = self.RNN() # batch,bptt,nclasses
-      ## eval loss
-      self.ybatch_onehot_full = tf.one_hot(indices=self.ybatch_id,depth=self.num_classes) # batch,bptt,nclasses
-      self.eval_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-                          labels=self.ybatch_onehot_full,logits=self.unscaled_logits_full)
+      self.ynode_logits,self.ycontext_logits,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
       ## train_loss
-      self.unscaled_logits_bptt = self.unscaled_logits_full[:,-3*7:,:]
-      self.ybatch_onehot_bptt = self.ybatch_onehot_full[:,-3*7:,:]
-      self.train_loss = tf.nn.softmax_cross_entropy_with_logits_v2(
-                          labels=self.ybatch_onehot_bptt,logits=self.unscaled_logits_bptt)
-      print("ADAM01")
-      self.minimizer_op = tf.train.AdamOptimizer(0.01).minimize(self.train_loss)
-      ## accuracy
-      self.yhat_sm = tf.nn.softmax(self.unscaled_logits_full)
-      self.yhat_id = tf.argmax(self.yhat_sm,-1)
+      self.ybatch_onehot_node = tf.one_hot(indices=self.ybatch_node_id,depth=self.num_nodes) 
+      self.train_loss_node = tf.nn.softmax_cross_entropy_with_logits_v2(
+                                  labels=self.ybatch_onehot_node,
+                                  logits=self.ynode_logits)
+      self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
+      self.train_loss_context = tf.nn.softmax_cross_entropy_with_logits_v2(
+                                  labels=self.ybatch_onehot_context,
+                                  logits=self.ycontext_logits)
+      self.train_loss = tf.concat([self.train_loss_node,self.train_loss_context],axis=1)
+      ## optimizer
+      self.minimize_node = tf.train.AdamOptimizer(0.01).minimize(self.train_loss_node)
+      self.minimize_context = tf.train.AdamOptimizer(0.01).minimize(self.train_loss_context)
+      # self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
+      self.minimizer_op = self.minimize_context
+      ## softmax normalization and argmax
+      self.ynode_sm = tf.nn.softmax(self.ynode_logits) 
+      self.ynode_id = tf.argmax(self.ynode_sm,-1)
+      self.ycontext_sm = tf.nn.softmax(self.ycontext_logits) 
+      self.ycontext_id = tf.argmax(self.ycontext_sm,-1)
       ## extra
       self.sess.run(tf.global_variables_initializer())
       self.saver_op = tf.train.Saver()
     return None
 
   def setup_placeholders(self):
-    self.xph = xph = tf.placeholder(tf.int32,
-                  shape=[None,self.depth],
-                  name="xdata_placeholder")
-    self.yph = yph = tf.placeholder(tf.int32,
-                  shape=[None,self.depth],
-                  name="ydata_placeholder")
-    self.batch_size_ph = tf.placeholder(tf.int64,
-                  shape=[],
-                  name="batchsize_placeholder")
-    self.dropout_keep_prob = tf.placeholder(tf.float32,
-                                shape=[],
-                                name="dropout_ph")
-    self.cellstate_ph = tf.placeholder(tf.float32,
-                  shape=[None,self.stsize],
-                  name = "initialstate_ph")
+    self.xph = tf.placeholder(tf.int32,
+                  shape=[1,self.depth],
+                  name="xdata_ph")
+    self.yph = tf.placeholder(tf.int32,
+                  shape=[1,self.depth],
+                  name="ydata_node_ph")
+    self.cell_state = tf.placeholder(tf.float32,
+                  shape=[1,self.stsize],
+                  name="ydata_node_ph")
     return None
 
   def data_pipeline(self):
@@ -86,16 +84,20 @@ class MetaLearner():
     creates self.itr_initop and self.dataset
     returns x,y = get_next
     """
+    yph_node = tf.gather(self.yph,self.tstep_idx_node,axis=1)
+    yph_context = tf.gather(self.yph,self.tstep_idx_context,axis=1)
     # dataset
-    dataset = tf.data.Dataset.from_tensor_slices((self.xph,self.yph))
-    dataset = dataset.batch(self.batch_size_ph)
-    # dataset = self.dataset = dataset.shuffle(100000)
+    dataset = tf.data.Dataset.from_tensor_slices((self.xph,yph_node,yph_context))
     # iterator
     iterator = tf.data.Iterator.from_structure(
                 dataset.output_types, dataset.output_shapes)
-    xbatch,ybatch = iterator.get_next() 
+    xbatch,ybatch_node,ybatch_context = iterator.get_next() 
     self.itr_initop = iterator.make_initializer(dataset)
-    return xbatch,ybatch
+    # include batch dimension
+    xbatch = tf.expand_dims(xbatch,0)
+    ybatch_node = tf.expand_dims(ybatch_node,0)
+    ybatch_context = tf.expand_dims(ybatch_context,0)
+    return xbatch,ybatch_node,ybatch_context
 
   def reinitialize(self):
     print('**reinitializing weights** - incremental seeds')
@@ -106,46 +108,39 @@ class MetaLearner():
       self.sess.run(tf.global_variables_initializer())
     return None
 
-  def RNN(self):
-    """ 
-    general RNN structure that allows specifying 
-      - depth: number of (input_seq,output_seq) that are unrolled
-      - in_len: length of each input sequence
-      - out_len: length of each output sequence
-    consumes a sentence at a time
-      
-    RNN structure:
-      takes in state and a filler
-      returns prediction for next state and a filler
-    returns unscaled logits
+  def RNN(self,xbatch):
     """
-    xbatch = self.xbatch
-    cell = self.cell = CustomLSTM(
-            self.stsize,dropout_keep_prob=self.dropout_keep_prob)
-    xbatch = tf.layers.dense(xbatch,self.stsize,tf.nn.relu,name='inproj')
-    # unroll RNN
-    with tf.variable_scope('RNN_SCOPE') as cellscope:
-      # initialize state
-      # initial_state = state = cell.zero_state(tf.cast(self.batch_size_ph,tf.int32),tf.float32)
-      initstate = state = tf.nn.rnn_cell.LSTMStateTuple(self.cellstate_ph,self.cellstate_ph)
-      # unroll
-      outputL,stateL,fgateL = [],[],[]
-      for tstep in range(self.depth):
-        output,state = cell(xbatch[:,tstep,:], state)
-        stateL.append(state[0])
-        fgateL.append(cell.forget_act)
-        cellscope.reuse_variables()
-        outputL.append(output)
-    # format for y_hat
-    outputs = tf.stack(outputL,axis=1)
-    states = tf.stack(stateL,axis=1)
-    self.fgate = tf.stack(fgateL,axis=1)
-    # project to unscaled logits (to that outdim = num_classes)
-    outputs = tf.layers.dense(outputs,self.num_classes,tf.nn.relu,name='outproj_unscaled_logits')
-    return outputs,state,states
+    NB unlike before no input projection
+    """
+    inlayer = tf.keras.layers.Dense(self.stsize,activation='relu')
+    xbatch = inlayer(xbatch)
+    lstm_cell = tf.keras.layers.LSTMCell(self.stsize,dropout=0)
+    init_state = lstm_cell.get_initial_state(
+                    tf.get_variable('initial_state',
+                      trainable=True, 
+                      shape=[1,self.stsize]))
+    lstm_layer = tf.keras.layers.RNN(lstm_cell,
+                    stateful=False,
+                    return_sequences=True,
+                    return_state=True)
+    lstm_outputs,final_output,final_state = lstm_layer(xbatch,
+          initial_state=[self.cell_state,self.cell_state])
+    
+    ##  readout layers
+    # separate context from node prediction timesteps
+    lstm_outputs_node = tf.gather(lstm_outputs,self.tstep_idx_node,axis=1)
+    lstm_outputs_context = tf.gather(lstm_outputs,self.tstep_idx_context,axis=1)
+    # output layer
+    ynode_logits = tf.keras.layers.Dropout(0)(
+                    tf.keras.layers.Dense(self.num_nodes,activation=None)(
+                      lstm_outputs_node))
+    ycontext_logits = tf.keras.layers.Dropout(0)(
+                    tf.keras.layers.Dense(self.num_contexts,activation=None)(
+                      lstm_outputs_context))
+    return ynode_logits,ycontext_logits,final_state
+
 
 """ 
-
 """
 
 class Trainer():
@@ -154,7 +149,7 @@ class Trainer():
     self.net = net
     self.graph_pr = graph_pr
     self.shift_pr = shift_pr
-    self.task = CSWMLTask(self.graph_pr)
+    self.task = CSWTask(graph_pr)
     return None
 
   # steps: single pass through dataset
@@ -162,61 +157,58 @@ class Trainer():
   def train_step(self,Xtrain,Ytrain,cell_state):
     """ updates model parameters using Xtrain,Ytrain
     """
+    # tf.keras.backend.set_learning_phase(1)
     # initialize iterator with train data
     train_feed_dict = {
-      self.net.xph: Xtrain,
-      self.net.yph: Ytrain,
-      self.net.batch_size_ph: TRAIN_BATCH_SIZE,
-      self.net.dropout_keep_prob: .9,
-      self.net.cellstate_ph: cell_state
+      self.net.xph:Xtrain,
+      self.net.yph:Ytrain,
+      self.net.cell_state:cell_state
       }
     self.net.sess.run([self.net.itr_initop],train_feed_dict)
-    ## train step
-    _,new_cell_state = self.net.sess.run([
-                        self.net.minimizer_op,
-                        self.net.final_cell_state_op],
-                         feed_dict=train_feed_dict)
-    return new_cell_state
+    _,final_cell_state = self.net.sess.run([self.net.minimizer_op,self.net.final_state],train_feed_dict)
+    return final_cell_state
 
-  def eval_step(self,Xeval,Yeval,cell_state='rand'):
+  def eval_step(self,Xeval,Yeval,cell_state):
     """ makes predictions on full dataset
     currently predictions are made on both contexts using same embedding
     ideally i could make predictions on each context independently 
     so that could make predictions with the appropriate embedding
     """
-    if cell_state == 'rand':
-      cell_state = np.random.random([1,self.net.stsize])
-    # repeat cell state for each prediction
-    # cell_state = np.repeat(cell_state,axis=0)
+    # tf.keras.backend.set_learning_phase(0)
     # initialize data datastructure for collecting data
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
-                        ('yhat','float32',(self.net.depth,self.net.num_classes)),
-                        ('states','float32',(self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(self.net.depth,self.net.stsize))
+                        ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
+                        ('ycontext_sm','float32',(self.net.nstories,self.net.num_contexts)),
+                        # ('states','float32',(self.net.depth,self.net.stsize)),
+                        # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
-    eval_data_arr = np.zeros((),dtype=eval_array_dtype)
+    evalstep_data = np.zeros((),dtype=eval_array_dtype)
     # feed dict
     pred_feed_dict = {
       self.net.xph:Xeval,
       self.net.yph:Yeval,
-      self.net.batch_size_ph: 1,
-      self.net.dropout_keep_prob: 1.0,
-      self.net.cellstate_ph: cell_state
+      self.net.cell_state:cell_state
     }
     # initialize iterator with eval data
     self.net.sess.run(self.net.itr_initop,pred_feed_dict)
     # eval loop
     while True:
       try:
-        xbatch,yhat,states,fgate = self.net.sess.run(
-          [self.net.xbatch_id,self.net.yhat_sm,self.net.states,self.net.fgate],feed_dict=pred_feed_dict)
-        eval_data_arr['xbatch'] = xbatch.squeeze()
-        eval_data_arr['yhat'] = yhat.squeeze()
-        eval_data_arr['states'] = states.squeeze()
-        eval_data_arr['fgate'] = fgate.squeeze()
+        xbatch,ynode_sm,ycontext_sm = self.net.sess.run([
+                                      self.net.xbatch_id,
+                                      self.net.ynode_sm,
+                                      self.net.ycontext_sm,
+                                      # self.net.states,
+                                      # self.net.fgate
+                                      ],feed_dict=pred_feed_dict)
+        evalstep_data['xbatch'] = xbatch.squeeze()
+        evalstep_data['ynode_sm'] = ynode_sm.squeeze()
+        evalstep_data['ycontext_sm'] = ycontext_sm.squeeze()
+        # evalstep_data['states'] = states.squeeze()
+        # evalstep_data['fgate'] = fgate.squeeze()
       except tf.errors.OutOfRangeError:
         break 
-    return eval_data_arr
+    return evalstep_data
 
   def eval_loop(self,context_strL):
     """ 
@@ -225,8 +217,8 @@ class Trainer():
     eval_arr_dtype = [(context_str, [
                         ('xbatch','int32',(self.net.depth)),
                         ('yhat','float32',(self.net.depth,self.net.num_classes)),
-                        ('states','float32',(self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(self.net.depth,self.net.stsize))
+                        # ('states','float32',(self.net.depth,self.net.stsize)),
+                        # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]) for context_str in context_strL]
     eval_arr = np.zeros([],dtype=eval_arr_dtype)
     for context_str in context_strL:
@@ -238,30 +230,26 @@ class Trainer():
   def train_loop(self,nepochs):
     """ 
     """
-    nevals = nepochs
-    Xeval,Yeval = self.task.get_Xeval('A1B1A1A1B1B1')
-    print('training eval is on ABAABB')
+    Xeval,Yeval = self.task.get_Xeval('A1A1A1B1B1B1')
     ## setup eval data array
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
-                        ('yhat','float32',(self.net.depth,self.net.num_classes)),
-                        ('states','float32',(self.net.depth,self.net.stsize)),
-                        ('fgate','float32',(self.net.depth,self.net.stsize))
+                        ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
+                        ('ycontext_sm','float32',(self.net.nstories,self.net.num_contexts)),
+                        # ('states','float32',(self.net.depth,self.net.stsize)),
+                        # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
-    train_data = np.zeros((nevals), dtype=eval_array_dtype)
-    ## init cell state
-    rand_cell_state = cell_state = np.random.random([1,self.net.stsize])
+    train_data = np.zeros((nepochs), dtype=eval_array_dtype)
+    cell_state = np.zeros([1,self.net.stsize])
     # train loop
     for ep in range(nepochs):
       # generate data
       pathL,graphidL = self.task.gen_pathL(self.net.nstories,self.shift_pr)
       Xtrain,Ytrain = self.task.dataset_kstories(pathL,graphidL)
-      # eval network on data
-      trainstep_data = self.eval_step(Xeval,Yeval,cell_state)
-      train_data[ep] = trainstep_data
       # update params
       cell_state = self.train_step(Xtrain,Ytrain,cell_state)
-      cell_state = cell_state[0] # only c-state
       # eval
+      train_data[ep] = self.eval_step(Xeval,Yeval,cell_state)
+      
       if ep%(nepochs/20)==0:
         print(100*ep/nepochs)
     return train_data.squeeze()
@@ -271,13 +259,14 @@ class Trainer():
 adjacent stories are from different graphs w.p. pr_shift
 """
 
-class CSWMLTask():
+class CSWTask():
 
   def __init__(self,graph_pr):
     self.graphs = [self.get_graph(graph_pr),self.get_graph(1-graph_pr)]
     self.end_node = 9
     # randomly initialize context
     self.graph_idx = np.random.binomial(1,.5) # 0 or 1
+    self.graphids = [0,1]
 
   def get_graph(self,graph_pr):
     """ returns a dict which encodes graph
@@ -310,9 +299,9 @@ class CSWMLTask():
     while frnode!= self.end_node:
       path.append(frnode)
       distr = graph[frnode]
-      tonodes = list(distr.keys())
+      tonode = list(distr.keys())
       pr = list(distr.values())
-      frnode = np.random.choice(tonodes,p=pr)
+      frnode = np.random.choice(tonode,p=pr)
     path.append(self.end_node)
     return np.array(path)
 
@@ -321,7 +310,6 @@ class CSWMLTask():
     generates k paths fully interleaving graphA and graphB
     returns a list, each item being a path
     """
-    graphids = [10,11]
     pathL = []
     graphidL = []
     for i in range(k):
@@ -330,7 +318,7 @@ class CSWMLTask():
         self.graph_idx = (self.graph_idx+1)%2
       graph = self.graphs[self.graph_idx]
       path = self.gen_single_path(graph)
-      graphidL.append(graphids[self.graph_idx])
+      graphidL.append(self.graphids[self.graph_idx])
       pathL.append(path)
     return pathL,graphidL
 
@@ -342,11 +330,11 @@ class CSWMLTask():
       Y = [[[id,st(t+1),f1(t+1)],],]
       shape: (samples,depth)
     """
-    num_paths = len(pathL)
-    kpaths = np.concatenate([np.insert(pathL[i],0,graphidL[i]) for i in range(num_paths)])
-    kpaths = np.expand_dims(kpaths,0)
-    X = kpaths
+    X = np.concatenate(pathL)
     Y = np.roll(X,-1)
+    Y[np.arange(0,len(X),6)] = graphidL
+    X = np.expand_dims(X,0)
+    Y = np.expand_dims(Y,0)
     return X,Y
 
   def get_Xeval(self,context_str):
@@ -361,3 +349,5 @@ class CSWMLTask():
     graphidL = [D[context_str[2*cidx:2*cidx+2]][1] for cidx in np.arange(int(len(context_str)/2))]
     Xeval,Yeval = self.dataset_kstories(list(pathL),list(graphidL))
     return Xeval,Yeval
+
+
