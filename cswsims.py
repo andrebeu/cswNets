@@ -18,12 +18,12 @@ class CSWNet():
     self.stsize = stsize
     self.embed_dim = stsize
     self.nstories = 6
-    self.depth = 6*self.nstories 
-    self.num_classes = 12
+    self.story_depth = 6
+    self.depth = self.story_depth*self.nstories 
     self.num_nodes = 10
     self.num_contexts = 2
     # indexes for context and node time steps
-    self.tstep_idx_context = np.arange(0,self.depth,7)
+    self.tstep_idx_context = np.arange(0,self.depth,self.story_depth)
     self.tstep_idx_node = np.delete(np.arange(self.depth),self.tstep_idx_context)
     # build
     self.build()
@@ -40,26 +40,26 @@ class CSWNet():
       self.node_emat = tf.get_variable('node_emat',[self.num_nodes,self.embed_dim])
       self.xbatch = tf.nn.embedding_lookup(self.node_emat,self.xbatch_id,name='xembed') # batch,bptt,stsize
       ## inference
-      self.ynode_logits,self.ycontext_logits,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
+      self.ylogits_node,self.ylogits_context,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
       ## train_loss
       self.ybatch_onehot_node = tf.one_hot(indices=self.ybatch_node_id,depth=self.num_nodes) 
       self.train_loss_node = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_node,
-                                  logits=self.ynode_logits)
+                                  logits=self.ylogits_node)
       self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
       self.train_loss_context = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_context,
-                                  logits=self.ycontext_logits)
+                                  logits=self.ylogits_context)
       self.train_loss = tf.concat([self.train_loss_node,self.train_loss_context],axis=1)
       ## optimizer
-      self.minimize_node = tf.train.AdamOptimizer(0.01).minimize(self.train_loss_node)
-      self.minimize_context = tf.train.AdamOptimizer(0.01).minimize(self.train_loss_context)
+      self.minimize_node = tf.train.AdamOptimizer(0.001).minimize(self.train_loss_node)
+      self.minimize_context = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_context)
       # self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
       self.minimizer_op = self.minimize_context
       ## softmax normalization and argmax
-      self.ynode_sm = tf.nn.softmax(self.ynode_logits) 
+      self.ynode_sm = tf.nn.softmax(self.ylogits_node) 
       self.ynode_id = tf.argmax(self.ynode_sm,-1)
-      self.ycontext_sm = tf.nn.softmax(self.ycontext_logits) 
+      self.ycontext_sm = tf.nn.softmax(self.ylogits_context) 
       self.ycontext_id = tf.argmax(self.ycontext_sm,-1)
       ## extra
       self.sess.run(tf.global_variables_initializer())
@@ -75,7 +75,10 @@ class CSWNet():
                   name="ydata_node_ph")
     self.cell_state = tf.placeholder(tf.float32,
                   shape=[1,self.stsize],
-                  name="ydata_node_ph")
+                  name="cell_state_ph")
+    self.dropout_keep_pr = tf.placeholder(tf.float32,
+                  shape=[],
+                  name="dropout_ph")
     return None
 
   def data_pipeline(self):
@@ -109,6 +112,41 @@ class CSWNet():
     return None
 
   def RNN(self,xbatch):
+    """ 
+    """
+    cell = self.cell = CustomLSTM(
+            self.stsize,dropout_keep_prob=self.dropout_keep_pr)
+    xbatch = tf.layers.dense(xbatch,self.stsize,tf.nn.relu,name='inproj')
+    # unroll RNN
+    with tf.variable_scope('RNN_SCOPE') as cellscope:
+      # initialize state
+      state = tf.nn.rnn_cell.LSTMStateTuple(self.cell_state,self.cell_state)
+      # unroll
+      outL_node,outL_context,stateL,fgateL = [],[],[],[]
+      for tstep in range(self.depth):
+        output,state = cell(xbatch[:,tstep,:], state)
+        if tstep%self.story_depth==0:
+          outL_context.append(output)
+        else:
+          outL_node.append(output)
+        stateL.append(state[0])
+        fgateL.append(cell.forget_act)
+        cellscope.reuse_variables()
+    # format for y_hat
+    ylogits_node = tf.stack(outL_node,axis=1)
+    ylogits_context = tf.stack(outL_context,axis=1)
+    states = tf.stack(stateL,axis=1)
+    self.fgate = tf.stack(fgateL,axis=1)
+    # project to unscaled logits (to that outdim = num_classes)
+    ylogits_node = tf.layers.dense(ylogits_node,
+      self.num_nodes,tf.nn.relu,name='outproj_unscaled_logits_nodes')
+    ylogits_context = tf.layers.dense(ylogits_context,
+      self.num_contexts,tf.nn.relu,name='outproj_unscaled_logits_context')
+    ylogits_node = tf.layers.dropout(ylogits_node,rate=1-self.dropout_keep_pr)
+    ylogits_context = tf.layers.dropout(ylogits_context,rate=1-self.dropout_keep_pr)
+    return ylogits_node,ylogits_context,state[0]
+
+  def RNN_keras(self,xbatch):
     """
     NB unlike before no input projection
     """
@@ -131,13 +169,13 @@ class CSWNet():
     lstm_outputs_node = tf.gather(lstm_outputs,self.tstep_idx_node,axis=1)
     lstm_outputs_context = tf.gather(lstm_outputs,self.tstep_idx_context,axis=1)
     # output layer
-    ynode_logits = tf.keras.layers.Dropout(0)(
+    ylogits_node = tf.keras.layers.Dropout(0)(
                     tf.keras.layers.Dense(self.num_nodes,activation=None)(
                       lstm_outputs_node))
-    ycontext_logits = tf.keras.layers.Dropout(0)(
+    ylogits_context = tf.keras.layers.Dropout(0)(
                     tf.keras.layers.Dense(self.num_contexts,activation=None)(
                       lstm_outputs_context))
-    return ynode_logits,ycontext_logits,final_state
+    return ylogits_node,ylogits_context,final_state
 
 
 """ 
@@ -162,10 +200,13 @@ class Trainer():
     train_feed_dict = {
       self.net.xph:Xtrain,
       self.net.yph:Ytrain,
-      self.net.cell_state:cell_state
+      self.net.cell_state:cell_state,
+      self.net.dropout_keep_pr:0.9
       }
     self.net.sess.run([self.net.itr_initop],train_feed_dict)
-    _,final_cell_state = self.net.sess.run([self.net.minimizer_op,self.net.final_state],train_feed_dict)
+    _,final_cell_state = self.net.sess.run([
+      self.net.minimizer_op,self.net.final_state
+      ],train_feed_dict)
     return final_cell_state
 
   def eval_step(self,Xeval,Yeval,cell_state):
@@ -187,7 +228,8 @@ class Trainer():
     pred_feed_dict = {
       self.net.xph:Xeval,
       self.net.yph:Yeval,
-      self.net.cell_state:cell_state
+      self.net.cell_state:cell_state,
+      self.net.dropout_keep_pr:1.0
     }
     # initialize iterator with eval data
     self.net.sess.run(self.net.itr_initop,pred_feed_dict)
@@ -249,7 +291,6 @@ class Trainer():
       cell_state = self.train_step(Xtrain,Ytrain,cell_state)
       # eval
       train_data[ep] = self.eval_step(Xeval,Yeval,cell_state)
-      
       if ep%(nepochs/20)==0:
         print(100*ep/nepochs)
     return train_data.squeeze()
