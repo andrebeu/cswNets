@@ -5,7 +5,6 @@ from customtf import LayerNormBasicLSTMCell as CustomLSTM
 """
 """
 
-
 class CSWNet():
 
   def __init__(self,stsize,random_seed=1):
@@ -40,16 +39,21 @@ class CSWNet():
       self.node_emat = tf.get_variable('node_emat',[self.num_nodes,self.embed_dim])
       self.xbatch = tf.nn.embedding_lookup(self.node_emat,self.xbatch_id,name='xembed') # batch,bptt,stsize
       ## inference
-      self.ylogits_node,self.ylogits_context,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
+      self.ylogits_node_full,self.ylogits_context_full,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
       ## train_loss
+      # take separate training timesteps for each readout
+      self.ylogits_node_train = tf.gather(self.ylogits_node_full,self.tstep_idx_node,axis=1)
+      self.ylogits_context_train = tf.gather(self.ylogits_context_full,self.tstep_idx_context,axis=1)
+      # one hot labels
       self.ybatch_onehot_node = tf.one_hot(indices=self.ybatch_node_id,depth=self.num_nodes) 
+      self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
+      # loss
       self.train_loss_node = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_node,
-                                  logits=self.ylogits_node)
-      self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
+                                  logits=self.ylogits_node_train)
       self.train_loss_context = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_context,
-                                  logits=self.ylogits_context)
+                                  logits=self.ylogits_context_train)
       self.train_loss = tf.concat([self.train_loss_node,self.train_loss_context],axis=1)
       ## optimizer
       self.minimize_node = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_node)
@@ -57,9 +61,9 @@ class CSWNet():
       self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
       # self.minimizer_op = self.minimize_context
       ## softmax normalization and argmax
-      self.ynode_sm = tf.nn.softmax(self.ylogits_node) 
+      self.ynode_sm = tf.nn.softmax(self.ylogits_node_train) 
       self.ynode_id = tf.argmax(self.ynode_sm,-1)
-      self.ycontext_sm = tf.nn.softmax(self.ylogits_context) 
+      self.ycontext_sm = tf.nn.softmax(self.ylogits_context_full) 
       self.ycontext_id = tf.argmax(self.ycontext_sm,-1)
       ## extra
       self.sess.run(tf.global_variables_initializer())
@@ -122,30 +126,23 @@ class CSWNet():
       # initialize state
       state = tf.nn.rnn_cell.LSTMStateTuple(self.cell_state,self.cell_state)
       # unroll
-      outL_node,outL_context,stateL,fgateL = [],[],[],[]
-      outL = []
+      outL,stateL,fgateL = [],[],[]
       for tstep in range(self.depth):
         output,state = cell(xbatch[:,tstep,:], state)
         outL.append(output)
-        if tstep%self.story_depth==0:
-          outL_context.append(output)
-        else:
-          outL_node.append(output)
         stateL.append(state[0])
         fgateL.append(cell.forget_act)
         cellscope.reuse_variables()
-    # format for y_hat
-    ylogits_node = tf.stack(outL_node,axis=1)
-    ylogits_context = tf.stack(outL_context,axis=1)
-    states = tf.stack(stateL,axis=1)
+    # states and gates for inspection
+    self.states = tf.stack(stateL,axis=1)
     self.fgate = tf.stack(fgateL,axis=1)
-    # project to unscaled logits (to that outdim = num_classes)
-    ylogits_node = tf.layers.dense(ylogits_node,
-      self.num_nodes,tf.nn.relu,name='outproj_unscaled_logits_nodes')
-    ylogits_context = tf.layers.dense(ylogits_context,
-      self.num_contexts,tf.nn.relu,name='outproj_unscaled_logits_context')
-    ylogits_node = tf.layers.dropout(ylogits_node,rate=1-self.dropout_keep_pr)
-    ylogits_context = tf.layers.dropout(ylogits_context,rate=1-self.dropout_keep_pr)
+    ### readout layer
+    lstm_outputs = tf.stack(outL,axis=1)
+    # layers
+    ylogits_node = tf.layers.dense(lstm_outputs,
+      self.num_nodes,tf.nn.relu,name='logits_nodes')
+    ylogits_context = tf.layers.dense(lstm_outputs,
+      self.num_contexts,tf.nn.relu,name='logits_context')
     return ylogits_node,ylogits_context,state[0]
 
   def RNN_keras(self,xbatch):
@@ -221,7 +218,7 @@ class Trainer():
     # initialize data datastructure for collecting data
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
-                        ('ycontext_sm','float32',(self.net.nstories,self.net.num_contexts)),
+                        ('ycontext_sm','float32',(self.net.depth,self.net.num_contexts)),
                         # ('states','float32',(self.net.depth,self.net.stsize)),
                         # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
@@ -278,7 +275,7 @@ class Trainer():
     ## setup eval data array
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
-                        ('ycontext_sm','float32',(self.net.nstories,self.net.num_contexts)),
+                        ('ycontext_sm','float32',(self.net.depth,self.net.num_contexts)),
                         # ('states','float32',(self.net.depth,self.net.stsize)),
                         # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
