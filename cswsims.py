@@ -34,37 +34,35 @@ class CSWNet():
       # place holders
       self.setup_placeholders()
       # pipeline
-      self.xbatch_id,self.ybatch_node_id,self.ybatch_context_id = self.data_pipeline() # x(batches,bptt), y(batch,bptt)
+      self.xbatch_id,self.ybatch_node_id,self.ybatch_context_id = self.data_pipeline()
       ## embedding 
       self.node_emat = tf.get_variable('node_emat',[self.num_nodes,self.embed_dim])
-      self.xbatch = tf.nn.embedding_lookup(self.node_emat,self.xbatch_id,name='xembed') # batch,bptt,stsize
+      self.xbatch = tf.nn.embedding_lookup(self.node_emat,self.xbatch_id,name='xembed') 
       ## inference
-      self.ylogits_node_full,self.ylogits_context_full,self.final_state = self.RNN(self.xbatch) # batch,bptt,nclasses
+      self.ylogits_node_full,self.ylogits_context_full = self.RNN_keras(self.xbatch) # batch,bptt,nclasses
       ## train_loss
-      # take separate training timesteps for each readout
-      self.ylogits_node_train = tf.gather(self.ylogits_node_full,self.tstep_idx_node,axis=1)
-      self.ylogits_context_train = tf.gather(self.ylogits_context_full,self.tstep_idx_context,axis=1)
-      # one hot labels
-      self.ybatch_onehot_node = tf.one_hot(indices=self.ybatch_node_id,depth=self.num_nodes) 
-      self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
       # loss
+      self.ylogits_node_train = tf.gather(self.ylogits_node_full,self.tstep_idx_node,axis=1)
+      self.ybatch_onehot_node = tf.one_hot(indices=self.ybatch_node_id,depth=self.num_nodes) 
       self.train_loss_node = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_node,
-                                  logits=self.ylogits_node_train)
+                                  logits=self.ylogits_node_train,
+                                  name='node_readout_loss')
+      self.ylogits_context_train = tf.gather(self.ylogits_context_full,self.tstep_idx_context,axis=1)
+      self.ybatch_onehot_context = tf.one_hot(indices=self.ybatch_context_id,depth=self.num_contexts) 
       self.train_loss_context = tf.nn.softmax_cross_entropy_with_logits_v2(
                                   labels=self.ybatch_onehot_context,
-                                  logits=self.ylogits_context_train)
+                                  logits=self.ylogits_context_train,
+                                  name='context_readout_loss')
       self.train_loss = tf.concat([self.train_loss_node,self.train_loss_context],axis=1)
       ## optimizer
       self.minimize_node = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_node)
       self.minimize_context = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss_context)
       self.minimizer_op = tf.group([self.minimize_node,self.minimize_context])
-      # self.minimizer_op = self.minimize_context
+      # self.minimizer_op = tf.train.AdamOptimizer(0.0001).minimize(self.train_loss)
       ## softmax normalization and argmax
       self.ynode_sm = tf.nn.softmax(self.ylogits_node_train) 
-      self.ynode_id = tf.argmax(self.ynode_sm,-1)
       self.ycontext_sm = tf.nn.softmax(self.ylogits_context_full) 
-      self.ycontext_id = tf.argmax(self.ycontext_sm,-1)
       ## extra
       self.sess.run(tf.global_variables_initializer())
       self.saver_op = tf.train.Saver()
@@ -72,17 +70,20 @@ class CSWNet():
 
   def setup_placeholders(self):
     self.xph = tf.placeholder(tf.int32,
-                  shape=[1,self.depth],
+                  shape=[1,None],
                   name="xdata_ph")
     self.yph = tf.placeholder(tf.int32,
-                  shape=[1,self.depth],
+                  shape=[1,None],
                   name="ydata_node_ph")
     self.cell_state = tf.placeholder(tf.float32,
                   shape=[1,self.stsize],
                   name="cell_state_ph")
     self.dropout_keep_pr = tf.placeholder(tf.float32,
                   shape=[],
-                  name="dropout_ph")
+                  name="dropout_keep_pr")
+    self.dropout_rate = tf.placeholder(tf.float32,
+                  shape=[],
+                  name="dropout_rate")
     return None
 
   def data_pipeline(self):
@@ -149,32 +150,36 @@ class CSWNet():
     """
     NB unlike before no input projection
     """
-    inlayer = tf.keras.layers.Dense(self.stsize,activation='relu')
-    xbatch = inlayer(xbatch)
-    lstm_cell = tf.keras.layers.LSTMCell(self.stsize,dropout=0)
-    init_state = lstm_cell.get_initial_state(
-                    tf.get_variable('initial_state',
+    # input projection with dropout
+    xbatch = tf.keras.layers.Dense(self.stsize,activation='relu')(xbatch)
+    xbatch = tf.layers.dropout(xbatch,rate=self.dropout_rate)
+    # lstm cell
+    init_cstate = tf.get_variable('init_cstate',
                       trainable=True, 
-                      shape=[1,self.stsize]))
-    lstm_layer = tf.keras.layers.RNN(lstm_cell,
-                    stateful=False,
-                    return_sequences=True,
-                    return_state=True)
-    lstm_outputs,final_output,final_state = lstm_layer(xbatch,
-          initial_state=[self.cell_state,self.cell_state])
-    
-    ##  readout layers
-    # separate context from node prediction timesteps
-    lstm_outputs_node = tf.gather(lstm_outputs,self.tstep_idx_node,axis=1)
-    lstm_outputs_context = tf.gather(lstm_outputs,self.tstep_idx_context,axis=1)
-    # output layer
-    ylogits_node = tf.keras.layers.Dropout(0)(
-                    tf.keras.layers.Dense(self.num_nodes,activation=None)(
-                      lstm_outputs_node))
-    ylogits_context = tf.keras.layers.Dropout(0)(
-                    tf.keras.layers.Dense(self.num_contexts,activation=None)(
-                      lstm_outputs_context))
-    return ylogits_node,ylogits_context,final_state
+                      shape=[1,self.stsize])
+    init_hstate = tf.get_variable('init_hstate',
+                      trainable=True, 
+                      shape=[1,self.stsize])
+    lstm_layer = tf.keras.layers.LSTM(self.stsize,return_sequences=True)
+    lstm_outputs = lstm_layer(xbatch,initial_state=[init_cstate,init_hstate])
+    ## readout layers
+    ylogits_node = tf.keras.layers.Dense(
+                      self.num_nodes,                      
+                      activation=None
+                      )(lstm_outputs)
+    ylogits_context = tf.keras.layers.Dense(
+                        self.num_contexts,                      
+                        activation=None
+                        )(lstm_outputs)
+    # readout dropout
+    ylogits_node = tf.layers.dropout(ylogits_node,
+                    rate=self.dropout_rate,
+                    name='node_readout')
+    ylogits_context = tf.layers.dropout(
+                    ylogits_context,
+                    rate=self.dropout_rate,
+                    name='context_readout')
+    return ylogits_node,ylogits_context
 
 
 """ 
@@ -191,7 +196,7 @@ class Trainer():
 
   # steps: single pass through dataset
 
-  def train_step(self,Xtrain,Ytrain,cell_state):
+  def train_step(self,Xtrain,Ytrain):
     """ updates model parameters using Xtrain,Ytrain
     """
     # tf.keras.backend.set_learning_phase(1)
@@ -199,16 +204,13 @@ class Trainer():
     train_feed_dict = {
       self.net.xph:Xtrain,
       self.net.yph:Ytrain,
-      self.net.cell_state:cell_state,
-      self.net.dropout_keep_pr:0.9
+      self.net.dropout_rate:0.1
       }
-    self.net.sess.run([self.net.itr_initop],train_feed_dict)
-    _,final_cell_state = self.net.sess.run([
-      self.net.minimizer_op,self.net.final_state
-      ],train_feed_dict)
-    return final_cell_state
+    self.net.sess.run(self.net.itr_initop,train_feed_dict)
+    self.net.sess.run(self.net.minimizer_op,train_feed_dict)
+    return None
 
-  def eval_step(self,Xeval,Yeval,cell_state):
+  def eval_step(self,Xeval,Yeval):
     """ makes predictions on full dataset
     currently predictions are made on both contexts using same embedding
     ideally i could make predictions on each context independently 
@@ -219,16 +221,13 @@ class Trainer():
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
                         ('ycontext_sm','float32',(self.net.depth,self.net.num_contexts)),
-                        # ('states','float32',(self.net.depth,self.net.stsize)),
-                        # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
     evalstep_data = np.zeros((),dtype=eval_array_dtype)
     # feed dict
     pred_feed_dict = {
       self.net.xph:Xeval,
       self.net.yph:Yeval,
-      self.net.cell_state:cell_state,
-      self.net.dropout_keep_pr:1.0
+      self.net.dropout_rate:0.0
     }
     # initialize iterator with eval data
     self.net.sess.run(self.net.itr_initop,pred_feed_dict)
@@ -239,14 +238,10 @@ class Trainer():
                                       self.net.xbatch_id,
                                       self.net.ynode_sm,
                                       self.net.ycontext_sm,
-                                      # self.net.states,
-                                      # self.net.fgate
                                       ],feed_dict=pred_feed_dict)
         evalstep_data['xbatch'] = xbatch.squeeze()
         evalstep_data['ynode_sm'] = ynode_sm.squeeze()
         evalstep_data['ycontext_sm'] = ycontext_sm.squeeze()
-        # evalstep_data['states'] = states.squeeze()
-        # evalstep_data['fgate'] = fgate.squeeze()
       except tf.errors.OutOfRangeError:
         break 
     return evalstep_data
@@ -276,20 +271,18 @@ class Trainer():
     eval_array_dtype = [('xbatch','int32',(self.net.depth)),
                         ('ynode_sm','float32',(self.net.depth-self.net.nstories,self.net.num_nodes)),
                         ('ycontext_sm','float32',(self.net.depth,self.net.num_contexts)),
-                        # ('states','float32',(self.net.depth,self.net.stsize)),
-                        # ('fgate','float32',(self.net.depth,self.net.stsize))
                         ]
     train_data = np.zeros((nepochs), dtype=eval_array_dtype)
-    cell_state = np.zeros([1,self.net.stsize])
+    # cell_state = np.zeros([1,self.net.stsize])
     # train loop
     for ep in range(nepochs):
       # generate data
       pathL,graphidL = self.task.gen_pathL(self.net.nstories,self.shift_pr)
       Xtrain,Ytrain = self.task.dataset_kstories(pathL,graphidL)
       # update params
-      cell_state = self.train_step(Xtrain,Ytrain,cell_state)
+      self.train_step(Xtrain,Ytrain)
       # eval
-      train_data[ep] = self.eval_step(Xeval,Yeval,cell_state)
+      train_data[ep] = self.eval_step(Xeval,Yeval)
       if ep%(nepochs/20)==0:
         print(100*ep/nepochs)
     return train_data.squeeze()
