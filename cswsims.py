@@ -287,9 +287,8 @@ class Trainer():
         print(100*ep/nepochs)
     return train_data.squeeze()
 
-
-""" CSW METALEARNING TASK
-adjacent stories are from different graphs w.p. pr_shift
+"""
+adjacent stories are from different contexts w.p. prshift
 """
 
 class CSWTask():
