@@ -1,26 +1,67 @@
 import numpy as np
+import torch as tr
+
+softmax = lambda ulog: tr.softmax(ulog,-1)
 
 
-"""
-coffee shop task for neural networks
-"""
+class SEMrep():
+  """ 
+  """
 
-""" TODO
-get_Xfull()
-gen_train_data()
+  def __init__(self,stsize,nschemas,seed=0):
+    self.schlib = [CSWNet(stsize,sch+seed) for sch in range(nschemas)]
+    return None
 
-write a get_graph which takes in graph_depth and graph_pr 
-  and returns the appropriate dict
+  def select_net(self,xdata,ydata):
+    ## select active schema: best predicting net
+    peL = []
+    for net in self.schlib:
+      yhat = net(xdata)  
+      pe = self.calc_PE(yhat,ydata)
+      peL.append(pe)
+    active_net = self.schlib[np.argmin(peL)]
+    # print('net:',np.argmin(peL))
+    return active_net
 
-"""
+  def calc_PE(self,yhat,ydata):
+    ydata_1hot = tr.nn.functional.one_hot(ydata,12).squeeze().float()
+    pe = np.sum((ydata_1hot.detach().numpy()-softmax(yhat).detach().numpy())**2)
+    return pe
 
-## data generation parameters
+
+
+class CSWNet(tr.nn.Module):
+
+  def __init__(self,stsize,seed):
+    super().__init__()
+    tr.manual_seed(seed)
+    self.seed = seed
+    self.stsize = stsize
+    self.smdim = 12
+    self.input_embed = tr.nn.Embedding(self.smdim,self.stsize)
+    self.lstm = tr.nn.LSTMCell(self.stsize,self.stsize)
+    self.init_lstm = tr.nn.Parameter(tr.rand(2,1,self.stsize),requires_grad=True)
+    self.ff_hid2ulog = tr.nn.Linear(self.stsize,self.smdim,bias=False)
+    return None
+
+  def forward(self,state_int):
+    ''' state_int contains ints [time,1] '''
+    state_emb = self.input_embed(state_int)
+    h_lstm,c_lstm = self.init_lstm
+    outputs = -tr.ones(len(state_emb),self.stsize)
+    for tstep in range(len(state_emb)):
+      h_lstm,c_lstm = self.lstm(state_emb[tstep],(h_lstm,c_lstm))
+      outputs[tstep] = h_lstm
+    outputs = self.ff_hid2ulog(outputs)
+    return outputs
+
 
 class CSWTask():
 
-  def __init__(self):
+  def __init__(self,graph_pr):
     self.end_node = 9
     self.fillerL = [self.end_node+1]
+    self.graph = self.get_graph(graph_pr)
 
   def get_graph(self,graph_pr):
     """ returns a dict which encodes graph
@@ -41,7 +82,7 @@ class CSWTask():
     }
     return graph
 
-  def gen_single_path(self,graph):
+  def sample_path(self):
     """
     begins at 0
     transitions to 1 or 2 w.p. .5
@@ -52,7 +93,7 @@ class CSWTask():
     frnode = 0
     while frnode!= self.end_node:
       path.append(frnode)
-      distr = graph[frnode]
+      distr = self.graph[frnode]
       tonodes = list(distr.keys())
       pr = list(distr.values())
       frnode = np.random.choice(tonodes,p=pr)
@@ -151,8 +192,9 @@ class CSWTask():
     Y = path[1:-1]
     X = np.vstack([X]).transpose()
     Y = np.vstack([Y]).transpose()
-    X = slice_and_stride(X,depth)
-    Y = slice_and_stride(Y,depth)
+    # X = tr.Tensor(X).unsqueeze(1)
+    Y = tr.LongTensor(Y)
+    X = tr.tensor(X) # int tensor
     return X,Y
 
   def format_Xeval(self,pathL):
@@ -164,6 +206,9 @@ class CSWTask():
     Xeval = np.array(pathL)
     Xeval = np.expand_dims(Xeval,2)
     return Xeval
+
+
+
 
 def slice_and_stride(X,depth=1):
   """ 
@@ -178,3 +223,5 @@ def slice_and_stride(X,depth=1):
     x = X[idx:idx+depth]
     Xstr.append(x)
   return np.array(Xstr)
+
+
