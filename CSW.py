@@ -29,7 +29,6 @@ class SEMrep():
     return pe
 
 
-
 class CSWNet(tr.nn.Module):
 
   def __init__(self,stsize,seed):
@@ -53,6 +52,37 @@ class CSWNet(tr.nn.Module):
       h_lstm,c_lstm = self.lstm(state_emb[tstep],(h_lstm,c_lstm))
       outputs[tstep] = h_lstm
     outputs = self.ff_hid2ulog(outputs)
+    return outputs
+
+
+class CSWNetReg(tr.nn.Module):
+  """
+  regression version of CSWnet
+  """
+
+  def __init__(self,env_dim,stsize,seed=0):
+    super().__init__()
+    tr.manual_seed(seed)
+    self.seed = seed
+    self.stsize = stsize
+    self.insize = self.outsize = env_dim
+    self.ff_in2lstm = tr.nn.Linear(self.insize,self.stsize,bias=True)
+    self.lstm = tr.nn.LSTMCell(self.stsize,self.stsize)
+    self.init_lstm = tr.nn.Parameter(tr.rand(2,1,self.stsize),requires_grad=True)
+    self.ff_hid2out = tr.nn.Linear(self.stsize,self.outsize,bias=True)
+    return None
+
+  def forward(self,state_x):
+    ''' 
+    state_x contains vecs [time,insize]
+    '''
+    state_emb = self.ff_in2lstm(state_x)
+    h_lstm,c_lstm = self.init_lstm
+    outputs = -tr.ones(len(state_emb),self.stsize)
+    for tstep in range(len(state_emb)):
+      h_lstm,c_lstm = self.lstm(state_emb[tstep],(h_lstm,c_lstm))
+      outputs[tstep] = h_lstm
+    outputs = self.ff_hid2out(outputs)
     return outputs
 
 
@@ -179,7 +209,7 @@ class CSWTask():
 	  to take in a number of paths to evaluate on.
   """
 
-  def dataset_onestory_with_marker(self,path,filler_id,depth=1):
+  def dataset_onestory_with_marker(self,path,filler_id,depth=1,keras=False):
     """ 
     given a path `arr` and filler_id `int`
     returns:
@@ -187,14 +217,18 @@ class CSWTask():
       Y = [[[id,st(t+1),f1(t+1)],],]
       shape: (samples,depth,len)
     """
-    path = np.insert(path,0,filler_id)
+    path = np.insert(path,1,filler_id)
     X = path[0:-2]
     Y = path[1:-1]
-    X = np.vstack([X]).transpose()
-    Y = np.vstack([Y]).transpose()
-    # X = tr.Tensor(X).unsqueeze(1)
-    Y = tr.LongTensor(Y)
-    X = tr.tensor(X) # int tensor
+    
+    if keras:
+      X = np.expand_dims(X,0)
+      Y = np.expand_dims(Y,0)
+    else:
+      X = np.vstack([X]).transpose()
+      Y = np.vstack([Y]).transpose()
+      Y = tr.LongTensor(Y)
+      X = tr.tensor(X) # int tensor
     return X,Y
 
   def format_Xeval(self,pathL):
@@ -206,8 +240,6 @@ class CSWTask():
     Xeval = np.array(pathL)
     Xeval = np.expand_dims(Xeval,2)
     return Xeval
-
-
 
 
 def slice_and_stride(X,depth=1):
